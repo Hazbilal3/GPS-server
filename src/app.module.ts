@@ -11,11 +11,13 @@ import { ValidateController } from './validate/validate.controller';
 import { ValidateService } from './validate/validate.service';
 import { ConfigModule } from '@nestjs/config';
 import { Module } from '@nestjs/common';
+import { User } from './user/user.entity';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   // eslint-disable-next-line prettier/prettier
   imports: [
-    ConfigModule.forRoot(),
+    ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST,
@@ -24,12 +26,13 @@ import { Module } from '@nestjs/common';
       password: process.env.DB_PASS,
       database: process.env.DB_NAME,
       entities: [Driver, Delivery, Mismatch],
-      synchronize: false, // Turn off for production
+      synchronize: true, // Turn off for production
       migrationsRun: true, // Automatically run migrations on startup
       migrations: ['dist/migrations/*.js'],
       autoLoadEntities: true,
     }),
-    TypeOrmModule.forFeature([Driver, Delivery, Mismatch]),
+    TypeOrmModule.forFeature([Driver, Delivery, Mismatch, User]),
+    AuthModule,
   ],
   controllers: [UploadController, ValidateController, ReportController],
   providers: [UploadService, GeocodeService, MatchService, ValidateService],

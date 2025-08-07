@@ -12,7 +12,7 @@ export class Mismatch {
   @Column()
   actual_address: string;
 
-  @Column()
+  @Column({ default: 0 })
   similarity_score: number;
 
   @ManyToOne(() => Delivery)
