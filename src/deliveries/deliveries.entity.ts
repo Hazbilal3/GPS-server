@@ -31,7 +31,7 @@ export class Delivery {
   @Column({ type: 'float', nullable: true })
   distanceKm?: number;
 
-  @Column()
+  @Column({type: 'varchar', nullable: false, default: 'pending' })
   status: string;
 
   @Column({ nullable: true })
