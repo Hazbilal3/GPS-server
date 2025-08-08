@@ -6,13 +6,14 @@ import { MatchService } from './match/match.service';
 import { Mismatch } from './mismatches/mismatches.entity';
 import { ReportController } from './report/report.controller';
 import { UploadController } from './upload/upload.controller';
-import { UploadService } from './upload/upload.service';
+import { DeliveryService } from './upload/upload.service';
 import { ValidateController } from './validate/validate.controller';
 import { ValidateService } from './validate/validate.service';
 import { ConfigModule } from '@nestjs/config';
 import { Module } from '@nestjs/common';
 import { User } from './user/user.entity';
 import { AuthModule } from './auth/auth.module';
+import { DriversController } from './drivers/drivers.controller';
 
 @Module({
   // eslint-disable-next-line prettier/prettier
@@ -34,7 +35,7 @@ import { AuthModule } from './auth/auth.module';
     TypeOrmModule.forFeature([Driver, Delivery, Mismatch, User]),
     AuthModule,
   ],
-  controllers: [UploadController, ValidateController, ReportController],
-  providers: [UploadService, GeocodeService, MatchService, ValidateService],
+  controllers: [UploadController, ValidateController, ReportController,DriversController],
+  providers: [DeliveryService, GeocodeService, MatchService, ValidateService],
 })
 export class AppModule {}

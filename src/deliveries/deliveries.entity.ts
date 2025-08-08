@@ -1,32 +1,45 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
-import { Driver } from 'src/drivers/drivers.entity';
+// deliveries.entity.ts
+import { Entity, Column, PrimaryGeneratedColumn, ManyToOne } from 'typeorm';
+import { Driver } from '../drivers/drivers.entity';
 
 @Entity()
 export class Delivery {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Column({ nullable: true })
+  driverId?: number;
+
+  @ManyToOne(() => Driver, (driver) => driver.deliveries)
+  driver: Driver;
+
   @Column()
   barcode: string;
 
   @Column()
-  sequence_number: number;
-
-  @Column()
   address: string;
 
+  @Column({ nullable: true })
+  gpsLocation?: string;
+
+  @Column({ type: 'float', nullable: true })
+  expectedLat?: number;
+
+  @Column({ type: 'float', nullable: true })
+  expectedLng?: number;
+
+  @Column({ type: 'float', nullable: true })
+  distanceKm?: number;
+
   @Column()
-  event: string;
+  status: string;
 
-  @Column({ type: 'timestamp', nullable: true })
-  timestamp: Date | null;
+  @Column({ nullable: true })
+  googleMapsLink?: string;
 
-  @Column('float')
-  latitude: number;
+  @Column({ type: 'float', nullable: true })
+  latitude?: number;
 
-  @Column('float')
-  longitude: number;
-
-  @ManyToOne(() => Driver, (driver) => driver.deliveries)
-  driver: Driver;
+  @Column({ type: 'float', nullable: true })
+  longitude?: number;
 }

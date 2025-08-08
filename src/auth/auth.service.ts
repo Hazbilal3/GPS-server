@@ -26,24 +26,56 @@ export class AuthService {
     return { message: 'User registered successfully' };
   }
 
-  async login(dto: LoginDto) {
-    const user = await this.usersRepo.findOne({ where: { email: dto.email } });
-    if (!user || !(await bcrypt.compare(dto.password, user.password))) {
-      throw new Error('Invalid credentials');
-    }
+  // async login(dto: LoginDto) {
+  //   const user = await this.usersRepo.findOne({ where: { email: dto.email } });
+  //   if (!user || !(await bcrypt.compare(dto.password, user.password))) {
+  //     throw new Error('Invalid credentials');
+  //   }
 
+  //   const token = this.jwtService.sign({
+  //     sub: user.id,
+  //     email: user.email,
+  //     role: user.userRole,
+  //   });
+
+  //   return {
+  //     accessToken: token,
+  //     user: {
+  //       id: user.id,
+  //       email: user.email,
+  //       role: user.userRole,
+  //     },
+  //   };
+  // }
+
+  async login(dto: LoginDto) {
+    let user;
+    if (dto.userRole === 1) {
+      user = await this.usersRepo.findOne({ where: { email: dto.email, userRole: 1 } });
+      if (!user || !(await bcrypt.compare(dto.password, user.password))) {
+        throw new Error('Invalid admin credentials');
+      }
+    } else if (dto.userRole === 2) {
+      user = await this.usersRepo.findOne({ where: { driverId: dto.driverId, userRole: 2 } });
+      if (!user || !(await bcrypt.compare(dto.password, user.password))) {
+        throw new Error('Invalid driver credentials');
+      }
+    } else {
+      throw new Error('Invalid user role');
+    }
     const token = this.jwtService.sign({
       sub: user.id,
       email: user.email,
       role: user.userRole,
+      driverId: user.driverId,
     });
-
     return {
       accessToken: token,
       user: {
         id: user.id,
         email: user.email,
         role: user.userRole,
+        driverId: user.driverId,
       },
     };
   }

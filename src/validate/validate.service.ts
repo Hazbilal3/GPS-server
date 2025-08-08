@@ -14,7 +14,7 @@ export class ValidateService {
     @InjectRepository(Mismatch)
     private readonly mismatchRepo: Repository<Mismatch>,
     private readonly geocodeService: GeocodeService,
-    private readonly matchService: MatchService,
+    private readonly matchService: MatchService
   ) {}
 
   async validateDeliveries(): Promise<Mismatch[]> {
@@ -22,6 +22,10 @@ export class ValidateService {
     const deliveries = await this.deliveryRepo.find({ relations: ['driver'] });
 
     for (const delivery of deliveries) {
+      if (typeof delivery.latitude !== 'number' || typeof delivery.longitude !== 'number') {
+        // Skip this delivery if latitude or longitude is undefined
+        continue;
+      }
       const actualAddress = await this.geocodeService.reverseGeocode(
         delivery.latitude,
         delivery.longitude,

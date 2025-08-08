@@ -5,6 +5,9 @@ export class User {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Column({ nullable: true })
+  driverId: number;
+
   @Column()
   firstname: string;
 
@@ -18,5 +21,5 @@ export class User {
   password: string;
 
   @Column()
-  userRole: number; // 1 = admin, 2 = driver
+  userRole: number; 
 }

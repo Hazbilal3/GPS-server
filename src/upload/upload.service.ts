@@ -1,62 +1,77 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
-import * as XLSX from 'xlsx';
-import { Delivery } from '../deliveries/deliveries.entity';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Delivery } from '../deliveries/deliveries.entity';
 import { Repository } from 'typeorm';
-import { Driver } from '../drivers/drivers.entity';
+import * as fs from 'fs';
+import { parse } from 'csv-parse';
+import { geocodeAddress, calculateDistance } from '../geocode/geo.utils';
 
 @Injectable()
-export class UploadService {
+export class DeliveryService {
   constructor(
     @InjectRepository(Delivery)
-    private readonly deliveryRepo: Repository<Delivery>,
-    @InjectRepository(Driver)
-    private readonly driverRepo: Repository<Driver>,
+    private deliveryRepo: Repository<Delivery>,
   ) {}
 
-  async parseAndSave(fileBuffer: Buffer): Promise<Delivery[]> {
-    const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json<any>(sheet);
-
-    // Ensure default driver exists
-    let driver = await this.driverRepo.findOneBy({
-      name: 'AutoImportedDriver',
+  async processCSV(filePath: string, driverId: number): Promise<Delivery[]> {
+    const data = fs.readFileSync(filePath, 'utf-8');
+    const records = await new Promise<any[]>((resolve, reject) => {
+      parse(
+        data,
+        { columns: true, skip_empty_lines: true, trim: true },
+        (err, output) => {
+          if (err) reject(err);
+          else resolve(output);
+        },
+      );
     });
-    if (!driver) {
-      driver = this.driverRepo.create({ name: 'AutoImportedDriver' });
-      await this.driverRepo.save(driver);
-    }
 
     const deliveries: Delivery[] = [];
 
-    for (const row of data) {
-      if (!row['Barcode']) continue;
+    for (const record of records) {
+      const barcode = record['Barcode'];
+      const address = record['Address'];
+      const gpsLocation = record['Last GPS location'];
 
-      const [lat, lng] = (row['Last GPS location'] || '')
-        .split(' ')
-        .map(Number);
+      const parsedGps = gpsLocation?.split(' ').map(Number) ?? [];
+      const gps = parsedGps.length === 2 && !parsedGps.some(isNaN) ? (parsedGps as [number, number]) : null;
 
-      const rawTimestamp = row['Last Event time'];
-      const parsedTimestamp = new Date(rawTimestamp);
-      const isValidDate =
-        parsedTimestamp instanceof Date && !isNaN(parsedTimestamp.getTime());
+
+      const expectedCoords = await geocodeAddress(address);
+      const distance =
+        gps && expectedCoords ? calculateDistance(gps, expectedCoords) : null;
+
+      const status = distance !== null && distance <= 10 ? 'Match' : 'Mismatch';
+      const mapsLink =
+        gps && expectedCoords
+          ? `https://www.google.com/maps/dir/${gps[0]},${gps[1]}/${expectedCoords[0]},${expectedCoords[1]}`
+          : null;
 
       const delivery = this.deliveryRepo.create({
-        barcode: String(row['Barcode']),
-        sequence_number: parseInt(row['Seq No'], 10),
-        address: String(row['Address']),
-        event: String(row['Last Event']),
-        timestamp: isValidDate ? parsedTimestamp : new Date(), // fallback to now
-        latitude: lat,
-        longitude: lng,
-        driver,
-      });
+        driverId,
+        barcode,
+        address,
+        gpsLocation,
+        expectedLat: expectedCoords?.[0],
+        expectedLng: expectedCoords?.[1],
+        distanceKm: distance,
+        status,
+        googleMapsLink: mapsLink,
+        latitude: gps?.[0],
+        longitude: gps?.[1],
+      } as Partial<Delivery> as Partial<Delivery>);
 
-      deliveries.push(delivery);
+      const savedDelivery = await this.deliveryRepo.save(delivery);
+      deliveries.push(savedDelivery);
     }
 
-    return await this.deliveryRepo.save(deliveries);
+    return deliveries;
+  }
+
+  async getAllDeliveries(): Promise<Delivery[]> {
+    return this.deliveryRepo.find();
   }
 }

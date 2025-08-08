@@ -1,4 +1,6 @@
 export class LoginDto {
-  email: string;
+  email?: string;
   password: string;
+  driverId?: number;
+  userRole: number;
 }

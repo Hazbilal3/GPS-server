@@ -3,20 +3,41 @@ import {
   Post,
   UseInterceptors,
   UploadedFile,
-  Body,
-  BadRequestException,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { UploadService } from './upload.service';
+import { diskStorage } from 'multer';
+import { DeliveryService } from './upload.service';
+import { AuthGuard } from '../auth/auth.guard'; // Your auth guard
+import { parse } from 'csv-parse';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Controller('upload')
 export class UploadController {
-  constructor(private readonly uploadService: UploadService) {}
+  constructor(private deliveryService: DeliveryService) {}
 
+  @UseGuards(AuthGuard) // assuming you attach driverId to req.user
   @Post()
-  @UseInterceptors(FileInterceptor('file'))
-  async uploadFile(@UploadedFile() file: Express.Multer.File) {
-    if (!file) throw new BadRequestException('No file uploaded');
-    return this.uploadService.parseAndSave(file.buffer);
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads',
+        filename: (req, file, cb) => {
+          const filename = `${Date.now()}-${file.originalname}`;
+          cb(null, filename);
+        },
+      }),
+    }),
+  )
+  async uploadFile(@UploadedFile() file: Express.Multer.File, @Req() req) {
+    const filePath = path.resolve(file.path);
+    const driverId = req.user.id;
+
+    // Save deliveries to DB
+    const deliveries = await this.deliveryService.processCSV(filePath, driverId);
+
+    return { message: 'File processed', count: deliveries.length };
   }
 }
