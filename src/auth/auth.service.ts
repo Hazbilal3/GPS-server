@@ -51,12 +51,16 @@ export class AuthService {
   async login(dto: LoginDto) {
     let user;
     if (dto.userRole === 1) {
-      user = await this.usersRepo.findOne({ where: { email: dto.email, userRole: 1 } });
+      user = await this.usersRepo.findOne({
+        where: { email: dto.email, userRole: 1 },
+      });
       if (!user || !(await bcrypt.compare(dto.password, user.password))) {
         throw new Error('Invalid admin credentials');
       }
     } else if (dto.userRole === 2) {
-      user = await this.usersRepo.findOne({ where: { driverId: dto.driverId, userRole: 2 } });
+      user = await this.usersRepo.findOne({
+        where: { driverId: dto.driverId, userRole: 2 },
+      });
       if (!user || !(await bcrypt.compare(dto.password, user.password))) {
         throw new Error('Invalid driver credentials');
       }
