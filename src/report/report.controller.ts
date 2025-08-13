@@ -34,21 +34,21 @@ export class ReportController {
   }
 
   @Get()
-  async getReports(
-    @Res() res: Response,
-    @Query('driver_id') driverId?: number,
-    @Query('date') date?: string,
-  ) {
-    let query = this.mismatchRepo
-      .createQueryBuilder('mismatch')
-      .leftJoinAndSelect('mismatch.delivery', 'delivery');
-    if (driverId)
-      query = query.andWhere('delivery.driverId = :driverId', { driverId });
-    if (date)
-      query = query.andWhere('DATE(delivery.timestamp) = :date', { date });
-    const mismatches = await query.getMany();
-    res.json(mismatches);
-  }
+async getReports(
+  @Res() res: Response,
+  @Query('driver_id') driverId?: number,
+  @Query('date') date?: string,
+) {
+  let query = this.mismatchRepo
+    .createQueryBuilder('mismatch')
+    .leftJoinAndSelect('mismatch.delivery', 'delivery');
+  if (driverId)
+    query = query.andWhere('delivery.driverId = :driverId', { driverId });
+  if (date)
+    query = query.andWhere('DATE(delivery.timestamp) = :date', { date });
+  const mismatches = await query.getMany();
+  res.json(mismatches);
+}
 
   @Get('/export')
   async exportReport(

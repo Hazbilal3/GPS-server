@@ -23,7 +23,6 @@ export class ValidateService {
 
     for (const delivery of deliveries) {
       if (typeof delivery.latitude !== 'number' || typeof delivery.longitude !== 'number') {
-        // Skip this delivery if latitude or longitude is undefined
         continue;
       }
       const actualAddress = await this.geocodeService.reverseGeocode(

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Delivery } from '../deliveries/deliveries.entity';
-import * as fs from 'fs';
+import * as xlsx from 'xlsx';
 import { createReadStream, promises as fsp } from 'fs';
 import { parse } from 'csv-parse';
 import { geocodeAddress, calculateDistance } from '../geocode/geo.utils';
@@ -149,5 +149,79 @@ export class DeliveryService {
 
   async getAllDeliveries(): Promise<Delivery[]> {
     return this.deliveryRepo.find();
+  }
+
+   async processExcel(filePath: string, driverId: number): Promise<Delivery[]> {
+    const workbook = xlsx.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows: any[] = xlsx.utils.sheet_to_json(sheet);
+
+    // Use same logic as processCSV for each row
+    const processed = await this.withConcurrency(
+      rows,
+      this.geocodeConcurrency,
+      async (record, idx) => {
+        try {
+          const barcode = record['Barcode'];
+          const address = record['Address'];
+          const gpsLocation = record['Last GPS location'];
+
+          const gps = this.parseGps(gpsLocation);
+
+          let expectedCoords: [number, number] | null = null;
+          try {
+            expectedCoords = address ? await geocodeAddress(address) : null;
+          } catch (e) {
+            this.logger.warn(
+              `Geocode failed for row ${idx + 1} (${address}): ${String(e)}`,
+            );
+          }
+
+          const distance =
+            gps && expectedCoords
+              ? calculateDistance(gps, expectedCoords)
+              : null;
+
+          let status: 'Match' | 'Mismatch' | 'Insufficient Data';
+          if (distance === null) status = 'Insufficient Data';
+          else status = distance <= this.matchKm ? 'Match' : 'Mismatch';
+
+          const mapsLink =
+            gps && expectedCoords
+              ? `https://www.google.com/maps/dir/${gps[0]},${gps[1]}/${expectedCoords[0]},${expectedCoords[1]}`
+              : null;
+
+          const entity = this.deliveryRepo.create({
+            driverId,
+            barcode,
+            address,
+            gpsLocation,
+            expectedLat: expectedCoords?.[0] ?? null,
+            expectedLng: expectedCoords?.[1] ?? null,
+            distanceKm: distance,
+            status,
+            googleMapsLink: mapsLink,
+            latitude: gps?.[0] ?? null,
+            longitude: gps?.[1] ?? null,
+          } as Partial<Delivery>);
+
+          return entity;
+        } catch (err) {
+          this.logger.error(`Row ${idx + 1} failed: ${String(err)}`);
+          return null;
+        }
+      },
+    );
+
+    const toSave = processed.filter(Boolean) as Delivery[];
+    const saved = await this.deliveryRepo.manager.transaction(async (trx) => {
+      return await trx.save(toSave);
+    });
+
+    // Cleanup file
+    await fsp.unlink(filePath).catch(() => {});
+
+    return saved;
   }
 }

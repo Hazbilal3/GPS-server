@@ -1,45 +1,52 @@
-// deliveries.entity.ts
-import { Entity, Column, PrimaryGeneratedColumn, ManyToOne } from 'typeorm';
-import { Driver } from '../drivers/drivers.entity';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  OneToMany,
+  JoinColumn,
+} from 'typeorm';
+import { Driver } from 'src/drivers/drivers.entity';
+import { Mismatch } from '../mismatches/mismatches.entity';
 
 @Entity()
 export class Delivery {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ nullable: true })
-  driverId?: number;
-
-  @ManyToOne(() => Driver, (driver) => driver.deliveries)
-  driver: Driver;
-
   @Column()
   barcode: string;
+
+  @Column({ type: 'int', default: 0 })
+  sequence_number: number;
 
   @Column()
   address: string;
 
+  @Column({ default: 'UNKNOWN' })
+event: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  timestamp: Date;
+
+@Column('float', { nullable: true })
+latitude: number;
+
+@Column('float', { nullable: true })
+  longitude: number;
+
+  @ManyToOne(() => Driver, (driver) => driver.deliveries, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'driverId' })
+  driver: Driver;
+
   @Column({ nullable: true })
-  gpsLocation?: string;
+  driverId: number;
 
-  @Column({ type: 'float', nullable: true })
-  expectedLat?: number;
+  @Column({ type: 'int', nullable: true })
+  sequenceNumber: number;
 
-  @Column({ type: 'float', nullable: true })
-  expectedLng?: number;
-
-  @Column({ type: 'float', nullable: true })
-  distanceKm?: number;
-
-  @Column({type: 'varchar', nullable: false, default: 'pending' })
-  status: string;
-
-  @Column({ nullable: true })
-  googleMapsLink?: string;
-
-  @Column({ type: 'float', nullable: true })
-  latitude?: number;
-
-  @Column({ type: 'float', nullable: true })
-  longitude?: number;
+  @OneToMany(() => Mismatch, (mismatch) => mismatch.delivery)
+  mismatches: Mismatch[];
 }

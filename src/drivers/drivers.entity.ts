@@ -1,5 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
-import { Delivery } from 'src/deliveries/deliveries.entity'; 
+import { Delivery } from 'src/deliveries/deliveries.entity';
 
 @Entity()
 export class Driver {

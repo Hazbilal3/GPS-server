@@ -12,7 +12,7 @@ import { diskStorage } from 'multer';
 import { DeliveryService } from './upload.service';
 import { AuthGuard } from '../auth/auth.guard'; // Your auth guard
 import * as path from 'path';
-
+import * as xlsx from 'xlsx'; 
 @Controller('upload')
 export class UploadController {
   constructor(private deliveryService: DeliveryService) {}
@@ -31,12 +31,21 @@ export class UploadController {
     }),
   )
   async uploadFile(@UploadedFile() file: Express.Multer.File, @Req() req) {
-    const filePath = path.resolve(file.path);
-    const driverId = req.user.id; // Assuming user is attached to the request
+     const filePath = path.resolve(file.path);
+    const driverId = req.user.id;
 
-    // Save deliveries to DB
-    const deliveries = await this.deliveryService.processCSV(filePath, driverId);
+    let deliveries;
+    if (file.originalname.endsWith('.csv')) {
+      deliveries = await this.deliveryService.processCSV(filePath, driverId);
+    } else if (
+      file.originalname.endsWith('.xlsx') ||
+      file.originalname.endsWith('.xls')
+    ) {
+      deliveries = await this.deliveryService.processExcel(filePath, driverId);
+    } else {
+      return { message: 'Unsupported file type', count: 0, data: [] };
+    }
 
-    return { message: 'File processed', count: deliveries.length };
+    return { message: 'File processed', count: deliveries.length, data: deliveries };
   }
 }

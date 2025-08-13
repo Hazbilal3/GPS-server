@@ -1,4 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
 import { Delivery } from 'src/deliveries/deliveries.entity';
 
 @Entity()
@@ -12,9 +18,15 @@ export class Mismatch {
   @Column()
   actual_address: string;
 
-  @Column({ default: 0 })
-  similarity_score: number;
+@Column('float', { default: 0 })
+similarity_score: number;
 
-  @ManyToOne(() => Delivery)
+  @ManyToOne(() => Delivery, (delivery) => delivery.mismatches, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'deliveryId' })
   delivery: Delivery;
+
+  @Column({ nullable: true })
+  deliveryId: number;
 }
