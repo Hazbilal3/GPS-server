@@ -1,80 +1,75 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { User } from 'src/user/user.entity';
-import { RegisterDto } from 'src/user/dto/register.dto';
+import { PrismaService } from 'src/prisma.service';
 import { LoginDto } from 'src/user/dto/login.dto';
+import { RegisterDto } from 'src/user/dto/register.dto';
 
 @Injectable()
 export class AuthService {
   constructor(
-    @InjectRepository(User) private usersRepo: Repository<User>,
+    private prisma: PrismaService,
     private jwtService: JwtService,
   ) {}
 
   async register(dto: RegisterDto) {
-    const existing = await this.usersRepo.findOne({
-      where: { email: dto.email },
-    });
-    if (existing) throw new Error('User already exists');
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-    const hashed = await bcrypt.hash(dto.password, 10);
-    const user = this.usersRepo.create({ ...dto, password: hashed });
-    await this.usersRepo.save(user);
-    return { message: 'User registered successfully' };
+    if (dto.userRole === 1) { // Admin registration
+      return this.prisma.user.create({
+        data: {
+          firstname: dto.firstname,
+          lastname: dto.lastname,
+          email: dto.email,
+          password: hashedPassword,
+          userRole: 1,
+        },
+      });
+    } else if (dto.userRole === 2) { // Driver registration
+      return this.prisma.user.create({
+        data: {
+          driverId: dto.driverId,
+          firstname: dto.firstname,
+          lastname: '', // Optional for drivers
+          email: dto.email,
+          password: hashedPassword,
+          userRole: 2,
+        },
+      });
+    }
+    throw new UnauthorizedException('Invalid user role');
   }
-
-  // async login(dto: LoginDto) {
-  //   const user = await this.usersRepo.findOne({ where: { email: dto.email } });
-  //   if (!user || !(await bcrypt.compare(dto.password, user.password))) {
-  //     throw new Error('Invalid credentials');
-  //   }
-
-  //   const token = this.jwtService.sign({
-  //     sub: user.id,
-  //     email: user.email,
-  //     role: user.userRole,
-  //   });
-
-  //   return {
-  //     accessToken: token,
-  //     user: {
-  //       id: user.id,
-  //       email: user.email,
-  //       role: user.userRole,
-  //     },
-  //   };
-  // }
 
   async login(dto: LoginDto) {
     let user;
-    if (dto.userRole === 1) {
-      user = await this.usersRepo.findOne({
+    
+    if (dto.userRole === 1) { // Admin login
+      user = await this.prisma.user.findUnique({
         where: { email: dto.email, userRole: 1 },
       });
       if (!user || !(await bcrypt.compare(dto.password, user.password))) {
-        throw new Error('Invalid admin credentials');
+        throw new UnauthorizedException('Invalid admin credentials');
       }
-    } else if (dto.userRole === 2) {
-      user = await this.usersRepo.findOne({
+    } else if (dto.userRole === 2) { // Driver login
+      user = await this.prisma.user.findFirst({
         where: { driverId: dto.driverId, userRole: 2 },
       });
       if (!user || !(await bcrypt.compare(dto.password, user.password))) {
-        throw new Error('Invalid driver credentials');
+        throw new UnauthorizedException('Invalid driver credentials');
       }
     } else {
-      throw new Error('Invalid user role');
+      throw new UnauthorizedException('Invalid user role');
     }
-    const token = this.jwtService.sign({
+
+    const payload = {
       sub: user.id,
       email: user.email,
       role: user.userRole,
       driverId: user.driverId,
-    });
+    };
+
     return {
-      accessToken: token,
+      accessToken: this.jwtService.sign(payload),
       user: {
         id: user.id,
         email: user.email,

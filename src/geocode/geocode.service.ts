@@ -17,7 +17,9 @@ export class GeocodeService {
     return results.length ? results[0].formatted_address : '';
   }
 
-  async geocodeAddress(address: string): Promise<{ latitude: number; longitude: number } | null> {
+  async geocodeAddress(
+    address: string,
+  ): Promise<{ latitude: number; longitude: number } | null> {
     const apiKey = this.configService.get<string>('GOOGLE_MAPS_API_KEY');
     if (!apiKey) throw new Error('GOOGLE_MAPS_API_KEY not set');
 

@@ -1,63 +1,20 @@
-// src/upload/upload.controller.ts
-import {
-  Controller,
-  Post,
-  UseInterceptors,
-  UploadedFile,
-  Req,
-  UseGuards,
-  Body,
-} from '@nestjs/common';
+import { Controller, Post, UseInterceptors, UploadedFile, Body, ParseIntPipe, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { DeliveryService } from './upload.service';
-import { AuthGuard } from '../auth/auth.guard';
-import * as path from 'path';
+import { UploadService } from './upload.service';
 
-@Controller('upload') // All routes here are prefixed with /upload
+@Controller('uploads')
 export class UploadController {
-  constructor(private deliveryService: DeliveryService) {}
+  constructor(private uploadService: UploadService) {}
 
   @Post()
-  @UseGuards(AuthGuard)
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: diskStorage({
-        destination: './uploads',
-        filename: (req, file, cb) => {
-          const filename = `${Date.now()}-${file.originalname}`;
-          cb(null, filename);
-        },
-      }),
-    }),
-  )
+  @UseInterceptors(FileInterceptor('file'))
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
-    @Body('driverId') driverId: number,
-    @Req() req,
+    @Body('driverId', ParseIntPipe) driverId: number
   ) {
     if (!file) {
-      return { message: 'No file uploaded', count: 0 };
+      throw new BadRequestException('No file uploaded');
     }
-
-    const filePath = path.resolve(file.path);
-    let deliveries;
-
-    if (file.originalname.endsWith('.csv')) {
-      deliveries = await this.deliveryService.processCSV(filePath, driverId);
-    } else if (
-      file.originalname.endsWith('.xlsx') ||
-      file.originalname.endsWith('.xls')
-    ) {
-      deliveries = await this.deliveryService.processExcel(filePath, driverId);
-    } else {
-      return { message: 'Unsupported file type', count: 0, data: [] };
-    }
-
-    return {
-      message: 'File processed',
-      count: deliveries.length,
-      data: deliveries,
-    };
+    return this.uploadService.processExcel(file, driverId);
   }
 }

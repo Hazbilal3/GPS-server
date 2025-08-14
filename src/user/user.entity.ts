@@ -1,25 +1,9 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
-
-@Entity()
-export class User {
-  @PrimaryGeneratedColumn()
+export interface User {
   id: number;
-
-  @Column({ nullable: true })
-  driverId: number;
-
-  @Column()
+  driverId?: number;  // Optional (nullable)
   firstname: string;
-
-  @Column()
   lastname: string;
-
-  @Column({ unique: true })
   email: string;
-
-  @Column()
   password: string;
-
-  @Column()
   userRole: number;
 }

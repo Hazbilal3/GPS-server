@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  driverId  Int?     @unique
+  firstname String
+  lastname  String
+  email     String   @unique
+  password  String
+  userRole  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  exports   Export[]
+  uploads   Upload[]
+}
+
+model Upload {
+  id       Int    @id @default(autoincrement())
+  driverId Int?   // Should match User.driverId type
+  user     User?  @relation(fields: [driverId], references: [driverId])
+  barcode        String
+  address        String
+  gpsLocation    String?
+  expectedLat    Float?
+  expectedLng    Float?
+  distanceKm     Float?
+  status         String?
+  googleMapsLink String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  exports        Export[]
+}
+
+model Export {
+  id             Int      @id @default(autoincrement())
+  driverId       Int
+  barcode        String
+  address        String
+  gpsLocation    String?
+  expectedLat    Float?
+  expectedLng    Float?
+  distanceKm     Float?
+  status         String?
+  matches        String
+  googleMapsLink String?
+  uploadId       Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [driverId], references: [id])
+  upload         Upload?  @relation(fields: [uploadId], references: [id])
+}
