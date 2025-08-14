@@ -11,15 +11,15 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { DeliveryService } from './upload.service';
-import { AuthGuard } from '../auth/auth.guard'; // Your auth guard
+import { AuthGuard } from '../auth/auth.guard';
 import * as path from 'path';
-import * as xlsx from 'xlsx';
-@Controller('upload')
+
+@Controller('upload') // All routes here are prefixed with /upload
 export class UploadController {
   constructor(private deliveryService: DeliveryService) {}
 
-  @UseGuards(AuthGuard) // Ensure the AuthGuard is protecting this route
   @Post()
+  @UseGuards(AuthGuard)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
@@ -34,10 +34,15 @@ export class UploadController {
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body('driverId') driverId: number,
+    @Req() req,
   ) {
-    const filePath = path.resolve(file.path);
+    if (!file) {
+      return { message: 'No file uploaded', count: 0 };
+    }
 
+    const filePath = path.resolve(file.path);
     let deliveries;
+
     if (file.originalname.endsWith('.csv')) {
       deliveries = await this.deliveryService.processCSV(filePath, driverId);
     } else if (
