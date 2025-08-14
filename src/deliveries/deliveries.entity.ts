@@ -17,6 +17,9 @@ export class Delivery {
   @Column()
   barcode: string;
 
+ @Column({ nullable: true })
+  gps: string;
+
   @Column({ type: 'int', default: 0 })
   sequence_number: number;
 
@@ -24,15 +27,15 @@ export class Delivery {
   address: string;
 
   @Column({ default: 'UNKNOWN' })
-event: string;
+  event: string;
 
   @Column({ type: 'timestamp', nullable: true })
   timestamp: Date;
 
-@Column('float', { nullable: true })
-latitude: number;
+  @Column('float', { nullable: true })
+  latitude: number;
 
-@Column('float', { nullable: true })
+  @Column('float', { nullable: true })
   longitude: number;
 
   @ManyToOne(() => Driver, (driver) => driver.deliveries, {
@@ -49,4 +52,7 @@ latitude: number;
 
   @OneToMany(() => Mismatch, (mismatch) => mismatch.delivery)
   mismatches: Mismatch[];
+
+@Column({ type: 'timestamp', nullable: true })
+deliveredAt: Date;
 }

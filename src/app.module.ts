@@ -14,6 +14,8 @@ import { Module } from '@nestjs/common';
 import { User } from './user/user.entity';
 import { AuthModule } from './auth/auth.module';
 import { DriversController } from './drivers/drivers.controller';
+import { DeliveriesService } from './deliveries/deliveries.service';
+import { DeliveriesModule } from './deliveries/deliveries.module';
 
 @Module({
   // eslint-disable-next-line prettier/prettier
@@ -27,15 +29,16 @@ import { DriversController } from './drivers/drivers.controller';
       password: process.env.DB_PASS,
       database: process.env.DB_NAME,
       entities: [Driver, Delivery, Mismatch],
-      synchronize: true, // Turn off for production
-      migrationsRun: true, // Automatically run migrations on startup
+      synchronize: true, // disables auto schema sync
+  migrationsRun: false, // Automatically run migrations on startup
       migrations: ['dist/migrations/*.js'],
       autoLoadEntities: true,
     }),
     TypeOrmModule.forFeature([Driver, Delivery, Mismatch, User]),
     AuthModule,
+    DeliveriesModule
   ],
   controllers: [UploadController, ValidateController, ReportController,DriversController],
-  providers: [DeliveryService, GeocodeService, MatchService, ValidateService],
+  providers: [DeliveryService, GeocodeService, MatchService, ValidateService]
 })
 export class AppModule {}
