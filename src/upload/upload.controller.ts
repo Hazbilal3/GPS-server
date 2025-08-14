@@ -6,13 +6,14 @@ import {
   UploadedFile,
   Req,
   UseGuards,
+  Body,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { DeliveryService } from './upload.service';
 import { AuthGuard } from '../auth/auth.guard'; // Your auth guard
 import * as path from 'path';
-import * as xlsx from 'xlsx'; 
+import * as xlsx from 'xlsx';
 @Controller('upload')
 export class UploadController {
   constructor(private deliveryService: DeliveryService) {}
@@ -30,9 +31,11 @@ export class UploadController {
       }),
     }),
   )
-  async uploadFile(@UploadedFile() file: Express.Multer.File, @Req() req) {
-     const filePath = path.resolve(file.path);
-    const driverId = req.user.id;
+  async uploadFile(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('driverId') driverId: number,
+  ) {
+    const filePath = path.resolve(file.path);
 
     let deliveries;
     if (file.originalname.endsWith('.csv')) {
@@ -46,6 +49,10 @@ export class UploadController {
       return { message: 'Unsupported file type', count: 0, data: [] };
     }
 
-    return { message: 'File processed', count: deliveries.length, data: deliveries };
+    return {
+      message: 'File processed',
+      count: deliveries.length,
+      data: deliveries,
+    };
   }
 }
