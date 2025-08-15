@@ -5,6 +5,19 @@ import haversine from 'haversine-distance';
 import { PrismaService } from 'src/prisma.service';
 import { UploadRowDto } from './dto/upload.dto';
 
+function parseLatLngSpaceSeparated(input) {
+  const parts = input.trim().split(/\s+/); // split on space(s)
+  if (parts.length < 2) {
+    throw new Error(`Invalid gpsLocation format: ${input}`);
+  }
+  const lat = Number(parts[0]);
+  const lng = Number(parts[1]);
+  if (Number.isNaN(lat) || Number.isNaN(lng)) {
+    throw new Error(`Invalid numeric values in gpsLocation: ${input}`);
+  }
+  return { lat, lng };
+}
+
 @Injectable()
 export class UploadService {
   constructor(private prisma: PrismaService) {}
@@ -63,14 +76,16 @@ export class UploadService {
 
         if (gpsLocation && expectedLat && expectedLng) {
           try {
-            const [lat, lng] = gpsLocation.split(',').map(Number);
-            distanceKm = haversine(
-              { lat, lng },
-              { lat: expectedLat, lng: expectedLng }
-            ) / 1000;
+            const { lat, lng } = parseLatLngSpaceSeparated(gpsLocation);
+
+    const meters = haversine(
+      { lat, lng },
+      { lat: Number(expectedLat), lng: Number(expectedLng) }
+    );
+    distanceKm = meters / 1000; // convert to km
 
             status = distanceKm > 0.6 ? 'mismatch' : 'match';
-            googleMapsLink = `https://www.google.com/maps/search/?api=1&query=${expectedLat},${expectedLng}`;
+    googleMapsLink = `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${expectedLat},${expectedLng}`;
           } catch (error) {
             console.error('Distance calculation error:', error);
           }
