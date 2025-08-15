@@ -10,6 +10,8 @@ import { PrismaService } from './prisma.service';
 import { ReportController } from './report/report.controller';
 import { ReportService } from './report/report.service';
 import { APP_PIPE } from '@nestjs/core';
+import { DriverController } from './user/user.controller';
+import { DriverService } from './user/user.service';
 
 @Module({
   // eslint-disable-next-line prettier/prettier
@@ -17,8 +19,8 @@ import { APP_PIPE } from '@nestjs/core';
     ConfigModule.forRoot({ isGlobal: true }),
     AuthModule,
   ],
-  controllers: [UploadController, ReportController],
-  providers: [UploadService, GeocodeService, PrismaService, ReportService,
+  controllers: [UploadController, ReportController,DriverController],
+  providers: [UploadService, GeocodeService, PrismaService, ReportService, DriverService,
      {
       provide: APP_PIPE,
       useClass: ValidationPipe, // Add global validation pipe

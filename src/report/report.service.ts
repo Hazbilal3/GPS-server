@@ -12,7 +12,7 @@ export class ReportService {
   const { driverId, date, startDate, endDate, page = 1, limit = 10 } = filters;
   const skip = (page - 1) * limit;
   
-  const whereClause: any = {};s
+  const whereClause: any = {};
   if (driverId) {
     whereClause.driverId = Number(driverId); // Explicit conversion
   }
