@@ -1,33 +1,27 @@
-import { IsOptional, IsNumber, IsDateString, IsInt, Min } from 'class-validator';
+import { IsOptional, IsNumber, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ReportFilterDto {
   @IsOptional()
-  @Type(() => Number) // Add this to properly convert query params
+  @Type(() => Number)
   @IsNumber()
-  driverId?: number;
+  page?: number;
 
   @IsOptional()
-  @IsDateString()
+  @Type(() => Number)
+  @IsNumber()
+  @Max(10000)
+  limit?: number;
+
+  @IsOptional()
+  driverId?: string;
+
+  @IsOptional()
   date?: string;
 
   @IsOptional()
-  @IsDateString()
   startDate?: string;
 
   @IsOptional()
-  @IsDateString()
   endDate?: string;
-
-  @IsOptional()
-  @Type(() => Number) // Add this
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @IsOptional()
-  @Type(() => Number) // Add this
-  @IsInt()
-  @Min(1)
-  limit?: number = 10;
 }
