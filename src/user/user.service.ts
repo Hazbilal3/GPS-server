@@ -14,7 +14,7 @@ export class DriverService {
       },
       select: {
         driverId: true,
-        firstname: true,
+        fullName: true,
       },
     });
   }

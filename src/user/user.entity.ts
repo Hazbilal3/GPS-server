@@ -1,8 +1,9 @@
 export interface User {
   id: number;
+  adminId?: number; 
   driverId?: number;  // Optional (nullable)
-  firstname: string;
-  lastname: string;
+  fullName: string;
+  phoneNumber: string;
   email: string;
   password: string;
   userRole: number;

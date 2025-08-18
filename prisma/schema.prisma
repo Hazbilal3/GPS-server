@@ -10,11 +10,12 @@ datasource db {
 model User {
   id        Int      @id @default(autoincrement())
   driverId  Int?     @unique
-  firstname String
-  lastname  String
   email     String   @unique
   password  String
   userRole  Int
+  adminId  Int?
+  fullName String?
+  phoneNumber Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   exports   Export[]

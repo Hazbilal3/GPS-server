@@ -34,8 +34,7 @@ export class ReportService {
           include: {
             user: {
               select: {
-                firstname: true,
-                lastname: true,
+                fullName: true,
                 email: true,
               },
             },
@@ -73,8 +72,7 @@ export class ReportService {
         include: {
           user: {
             select: {
-              firstname: true;
-              lastname: true;
+              fullName: true;
               email: true;
             };
           };
@@ -90,8 +88,7 @@ export class ReportService {
           include: {
             user: {
               select: {
-                firstname: true,
-                lastname: true,
+                fullName: true,
                 email: true,
               },
             },
@@ -126,7 +123,7 @@ export class ReportService {
         { 
           label: 'Driver Name', 
           value: (row: any) => 
-            `${row.user?.firstname || ''} ${row.user?.lastname || ''}`.trim() 
+            row.user?.fullName.trim() 
         },
         { 
           label: 'Driver Email', 

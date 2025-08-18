@@ -18,8 +18,9 @@ export class AuthService {
     if (dto.userRole === 1) { // Admin registration
       return this.prisma.user.create({
         data: {
-          firstname: dto.firstname,
-          lastname: dto.lastname,
+          adminId : dto.adminId, // Optional for admin
+          fullName: dto.fullName,
+          phoneNumber: dto.phoneNumber,
           email: dto.email,
           password: hashedPassword,
           userRole: 1,
@@ -29,8 +30,8 @@ export class AuthService {
       return this.prisma.user.create({
         data: {
           driverId: dto.driverId,
-          firstname: dto.firstname,
-          lastname: '', // Optional for drivers
+          fullName: dto.fullName,
+          phoneNumber: dto.phoneNumber,
           email: dto.email,
           password: hashedPassword,
           userRole: 2,
@@ -44,8 +45,8 @@ export class AuthService {
     let user;
     
     if (dto.userRole === 1) { // Admin login
-      user = await this.prisma.user.findUnique({
-        where: { email: dto.email, userRole: 1 },
+      user = await this.prisma.user.findFirst({
+        where: { adminId: dto.adminId, userRole: 1 },
       });
       if (!user || !(await bcrypt.compare(dto.password, user.password))) {
         throw new UnauthorizedException('Invalid admin credentials');
@@ -63,9 +64,8 @@ export class AuthService {
 
     const payload = {
       sub: user.id,
-      email: user.email,
-      role: user.userRole,
-      driverId: user.driverId,
+      email: user.email || user.adminId || user.driverId,
+      role: user.userRole
     };
 
     return {
@@ -75,6 +75,7 @@ export class AuthService {
         email: user.email,
         role: user.userRole,
         driverId: user.driverId,
+        adminId: user.adminId,
       },
     };
   }
