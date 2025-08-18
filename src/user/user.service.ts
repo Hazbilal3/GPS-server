@@ -15,6 +15,8 @@ export class DriverService {
       select: {
         driverId: true,
         fullName: true,
+        email: true,
+        phoneNumber: true
       },
     });
   }
