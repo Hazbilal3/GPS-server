@@ -15,18 +15,7 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-    if (dto.userRole === 1) { // Admin registration
-      return this.prisma.user.create({
-        data: {
-          adminId : dto.adminId, // Optional for admin
-          fullName: dto.fullName,
-          phoneNumber: dto.phoneNumber,
-          email: dto.email,
-          password: hashedPassword,
-          userRole: 1,
-        },
-      });
-    } else if (dto.userRole === 2) { // Driver registration
+  if (dto.userRole === 2) { // Driver registration
       return this.prisma.user.create({
         data: {
           driverId: dto.driverId,
