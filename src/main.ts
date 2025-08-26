@@ -13,9 +13,10 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 app.enableCors({
-  origin: ['https://expeditedtransport.net','https://www.expeditedtransport.net','https://api.expeditedtransport.net'],
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  origin: ['https://expeditedtransport.net', 'https://www.expeditedtransport.net'],
   credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Authorization','Content-Type'],
 });
 
   new ValidationPipe({
