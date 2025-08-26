@@ -14,7 +14,7 @@ export class ReportFilterDto {
   limit?: number;
 
   @IsOptional()
-  driverId?: string;
+  driverId?: string | number;
 
   @IsOptional()
   date?: string;
