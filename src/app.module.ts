@@ -19,7 +19,7 @@ import { DriverService } from './user/user.service';
     ConfigModule.forRoot({ isGlobal: true }),
     AuthModule,
   ],
-  controllers: [UploadController, ReportController,DriverController],
+  controllers: [UploadController, ReportController,DriverController,DriverController],
   providers: [UploadService, GeocodeService, PrismaService, ReportService, DriverService,
      {
       provide: APP_PIPE,

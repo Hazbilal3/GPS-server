@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service'; // or your DB service
 
 @Injectable()
@@ -19,5 +19,25 @@ export class DriverService {
         phoneNumber: true
       },
     });
+  }
+
+  async deleteByDriverId(driverId: number) {
+    const driver = await this.prisma.user.findFirst({
+      where: { driverId },
+      select: { id: true, driverId: true, fullName: true ,phoneNumber: true},
+    });
+
+    if (!driver) {
+      throw new NotFoundException(`Driver with driverId ${driverId} not found`);
+    }
+
+    await this.prisma.user.delete({ where: { id: driver.id } });
+
+    return {
+      message: 'Driver deleted successfully',
+      deletedUserId: driver.id,
+      driverId: driver.driverId,
+      fullName: driver.fullName,
+    };
   }
 }
