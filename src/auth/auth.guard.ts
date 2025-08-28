@@ -8,7 +8,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
 import { Request } from 'express';
-
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(private configService: ConfigService) {}
