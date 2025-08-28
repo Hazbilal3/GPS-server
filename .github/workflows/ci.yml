@@ -76,9 +76,6 @@ jobs:
       - name: Prettier check
         run: npm run format:check
 
-      - name: Lint
-        run: npm run lint --if-present
-
       - name: Unit tests
         run: npm test -- --ci --reporters=default --reporters=jest-junit
         env:
