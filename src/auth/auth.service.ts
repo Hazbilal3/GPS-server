@@ -1,5 +1,11 @@
 // src/auth/auth.service.ts
-import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from 'src/prisma.service';
@@ -21,7 +27,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
   ) {
-     // Build transporter from env
+    // Build transporter from env
     const host = process.env.SMTP_HOST;
     const port = Number(process.env.SMTP_PORT ?? 587);
     const secure = (process.env.SMTP_SECURE ?? '') === 'true' || port === 465; // 465 = SMTPS
@@ -46,7 +52,8 @@ export class AuthService {
     if (!email) return null;
     const [name, domain] = email.split('@');
     if (!domain) return '***';
-    const maskedName = name.length <= 2 ? name[0] + '*' : name.slice(0, 2) + '***';
+    const maskedName =
+      name.length <= 2 ? name[0] + '*' : name.slice(0, 2) + '***';
     const [dName, dTld] = domain.split('.');
     const maskedDomain = (dName?.[0] ?? '*') + '***' + (dTld ? '.' + dTld : '');
     return `${maskedName}@${maskedDomain}`;
@@ -57,18 +64,22 @@ export class AuthService {
   }
 
   private async sendOtpEmail(to: string, code: string) {
-  const appName = process.env.APP_NAME || 'Our App';
+    const appName = process.env.APP_NAME || 'Our App';
 
-  // 1) Always use MAIL_FROM for the *visible* From
-  //    Never fall back to SMTP_USER, so your owner email won't show.
-  const from = process.env.MAIL_FROM || `"${appName} (no-reply)" <no-reply@${process.env.MAIL_DOMAIN || 'example.com'}>`;
+    // 1) Always use MAIL_FROM for the *visible* From
+    //    Never fall back to SMTP_USER, so your owner email won't show.
+    const from =
+      process.env.MAIL_FROM ||
+      `"${appName} (no-reply)" <no-reply@${process.env.MAIL_DOMAIN || 'example.com'}>`;
 
-  // 2) Make replies go nowhere (or to an unmonitored mailbox)
-  const replyTo = process.env.MAIL_REPLY_TO || `no-reply@${process.env.MAIL_DOMAIN || 'example.com'}`;
+    // 2) Make replies go nowhere (or to an unmonitored mailbox)
+    const replyTo =
+      process.env.MAIL_REPLY_TO ||
+      `no-reply@${process.env.MAIL_DOMAIN || 'example.com'}`;
 
-  const subject = `${appName} password reset code: ${code}`;
-  const text = `Your ${appName} password reset code is ${code}. It expires in 10 minutes. If you didn’t request this, ignore this email.`;
-  const html = `
+    const subject = `${appName} password reset code: ${code}`;
+    const text = `Your ${appName} password reset code is ${code}. It expires in 10 minutes. If you didn’t request this, ignore this email.`;
+    const html = `
     <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6">
       <p>Use this verification code to reset your password:</p>
       <p style="font-size:24px;letter-spacing:6px;font-weight:700;margin:16px 0">${code}</p>
@@ -77,30 +88,30 @@ export class AuthService {
     </div>
   `;
 
-  try {
-    const info = await this.transporter.sendMail({
-      from,                 // visible From (what recipients see)
-      sender: process.env.SMTP_USER, // aligns with the authenticated account
-      to,
-      subject,
-      text,
-      html,
-      replyTo,              // where a “reply” would be addressed
-      envelope: {           // SMTP envelope (Return-Path); not shown to users
-        from: replyTo,
+    try {
+      const info = await this.transporter.sendMail({
+        from, // visible From (what recipients see)
+        sender: process.env.SMTP_USER, // aligns with the authenticated account
         to,
-      },
-      headers: {
-        'Auto-Submitted': 'auto-generated',
-        'X-Auto-Response-Suppress': 'All',
-      },
-    });
-    return info.messageId;
-  } catch {
-    throw new InternalServerErrorException('Failed to send email');
+        subject,
+        text,
+        html,
+        replyTo, // where a “reply” would be addressed
+        envelope: {
+          // SMTP envelope (Return-Path); not shown to users
+          from: replyTo,
+          to,
+        },
+        headers: {
+          'Auto-Submitted': 'auto-generated',
+          'X-Auto-Response-Suppress': 'All',
+        },
+      });
+      return info.messageId;
+    } catch {
+      throw new InternalServerErrorException('Failed to send email');
+    }
   }
-}
-
 
   // ===== Forgot Password (ID → email → OTP → reset) =====
 
@@ -119,16 +130,21 @@ export class AuthService {
         select: { id: true, email: true },
       });
     } else {
-      throw new BadRequestException('Provide adminId for role 1 or driverId for role 2.');
+      throw new BadRequestException(
+        'Provide adminId for role 1 or driverId for role 2.',
+      );
     }
 
-    if (!user) throw new NotFoundException('No user found for the provided identifier.');
+    if (!user)
+      throw new NotFoundException('No user found for the provided identifier.');
 
     return {
       userId: user.id,
       maskedEmail: this.maskEmail(user.email),
       hasEmail: !!user.email,
-      message: user.email ? 'Email found for this account.' : 'No email attached to this account.',
+      message: user.email
+        ? 'Email found for this account.'
+        : 'No email attached to this account.',
     };
   }
 
@@ -138,7 +154,8 @@ export class AuthService {
       where: { id: dto.userId },
       select: { id: true, email: true },
     });
-    if (!user || !user.email) throw new NotFoundException('User or email not found.');
+    if (!user || !user.email)
+      throw new NotFoundException('User or email not found.');
 
     const code = this.generateOtp();
     const codeHash = await bcrypt.hash(code, 10);
@@ -181,7 +198,9 @@ export class AuthService {
       throw new BadRequestException('Code expired. Please request a new one.');
     }
     if ((user.resetCodeAttempts ?? 0) >= 5) {
-      throw new BadRequestException('Too many attempts. Please request a new code.');
+      throw new BadRequestException(
+        'Too many attempts. Please request a new code.',
+      );
     }
 
     const ok = await bcrypt.compare(dto.code, user.resetCodeHash);
@@ -196,7 +215,7 @@ export class AuthService {
     // Issue a short-lived reset token (ties the verified OTP to this user)
     const resetToken = this.jwtService.sign(
       { sub: user.id, purpose: 'password-reset' },
-      { expiresIn: '10m' }
+      { expiresIn: '10m' },
     );
 
     return { success: true, resetToken };
@@ -273,12 +292,16 @@ export class AuthService {
   async login(dto: LoginDto) {
     let user: any;
     if (dto.userRole === 1) {
-      user = await this.prisma.user.findFirst({ where: { adminId: dto.adminId, userRole: 1 } });
+      user = await this.prisma.user.findFirst({
+        where: { adminId: dto.adminId, userRole: 1 },
+      });
       if (!user || !(await bcrypt.compare(dto.password, user.password))) {
         throw new UnauthorizedException('Invalid admin credentials');
       }
     } else if (dto.userRole === 2) {
-      user = await this.prisma.user.findFirst({ where: { driverId: dto.driverId, userRole: 2 } });
+      user = await this.prisma.user.findFirst({
+        where: { driverId: dto.driverId, userRole: 2 },
+      });
       if (!user || !(await bcrypt.compare(dto.password, user.password))) {
         throw new UnauthorizedException('Invalid driver credentials');
       }
@@ -286,7 +309,11 @@ export class AuthService {
       throw new UnauthorizedException('Invalid user role');
     }
 
-    const payload = { sub: user.id, email: user.email || user.adminId || user.driverId, role: user.userRole };
+    const payload = {
+      sub: user.id,
+      email: user.email || user.adminId || user.driverId,
+      role: user.userRole,
+    };
     return {
       accessToken: this.jwtService.sign(payload),
       user: {

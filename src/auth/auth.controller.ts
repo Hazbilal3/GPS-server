@@ -22,7 +22,7 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
- @Post('forgot-lookup')
+  @Post('forgot-lookup')
   lookup(@Body() dto: LookupIdentifierDto) {
     return this.authService.lookupIdentifier(dto);
   }

@@ -7,8 +7,8 @@ import { PrismaModule } from 'src/prisma.module';
 
 @Module({
   imports: [
-    PrismaModule, // Import PrismaModule
-    JwtModule.register({ // Configure JWT
+    PrismaModule,
+    JwtModule.register({
       secret: process.env.JWT_SECRET,
       signOptions: { expiresIn: '24h' },
     }),
