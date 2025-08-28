@@ -107,16 +107,15 @@ export class ReportService {
         { label: 'Status', value: 'status' },
         {
           label: 'Created At',
-          value: (row: any) => row.createdAt.toISOString()
+          value: (row: any) => row.createdAt.toISOString(),
         },
         {
           label: 'Driver Name',
-          value: (row: any) =>
-            row.user?.fullName.trim()
+          value: (row: any) => row.user?.fullName.trim(),
         },
         {
           label: 'Driver Email',
-          value: (row: any) => row.user?.email || ''
+          value: (row: any) => row.user?.email || '',
         },
         { label: 'GPS Location', value: 'gpsLocation' },
         { label: 'Expected Latitude', value: 'expectedLat' },
@@ -133,7 +132,7 @@ export class ReportService {
     }
   }
   private buildWhereClause(
-    filters: Omit<ReportFilterDto, 'page' | 'limit'>
+    filters: Omit<ReportFilterDto, 'page' | 'limit'>,
   ): Prisma.UploadWhereInput {
     const where: Prisma.UploadWhereInput = {};
     if (filters.driverId) {

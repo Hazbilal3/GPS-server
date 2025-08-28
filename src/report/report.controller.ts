@@ -20,7 +20,8 @@ export class ReportController {
     const parsed: ReportFilterDto = {
       ...filters,
       driverId:
-        (filters as any).driverId !== undefined && (filters as any).driverId !== null
+        (filters as any).driverId !== undefined &&
+        (filters as any).driverId !== null
           ? Number((filters as any).driverId)
           : undefined,
       page: Number((filters as any).page) || 1,
@@ -37,7 +38,8 @@ export class ReportController {
     const parsed: ReportFilterDto = {
       ...filters,
       driverId:
-        (filters as any).driverId !== undefined && (filters as any).driverId !== null
+        (filters as any).driverId !== undefined &&
+        (filters as any).driverId !== null
           ? Number((filters as any).driverId)
           : undefined,
       page: Number((filters as any).page) || 1,

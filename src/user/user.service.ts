@@ -16,7 +16,7 @@ export class DriverService {
         driverId: true,
         fullName: true,
         email: true,
-        phoneNumber: true
+        phoneNumber: true,
       },
     });
   }
@@ -24,7 +24,7 @@ export class DriverService {
   async deleteByDriverId(driverId: number) {
     const driver = await this.prisma.user.findFirst({
       where: { driverId },
-      select: { id: true, driverId: true, fullName: true ,phoneNumber: true},
+      select: { id: true, driverId: true, fullName: true, phoneNumber: true },
     });
 
     if (!driver) {

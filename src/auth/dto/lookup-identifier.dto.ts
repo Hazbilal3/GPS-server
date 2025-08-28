@@ -5,9 +5,11 @@ export class LookupIdentifierDto {
   @IsIn([1, 2], { message: 'userRole must be 1 (Admin) or 2 (Driver)' })
   userRole: 1 | 2;
 
-  @IsOptional() @IsInt()
+  @IsOptional()
+  @IsInt()
   adminId?: number;
 
-  @IsOptional() @IsInt()
+  @IsOptional()
+  @IsInt()
   driverId?: number;
 }

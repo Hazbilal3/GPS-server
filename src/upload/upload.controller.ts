@@ -1,4 +1,12 @@
-import { Controller, Post, UseInterceptors, UploadedFile, Body, ParseIntPipe, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  UseInterceptors,
+  UploadedFile,
+  Body,
+  ParseIntPipe,
+  BadRequestException,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadService } from './upload.service';
 
@@ -10,7 +18,7 @@ export class UploadController {
   @UseInterceptors(FileInterceptor('file'))
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
-    @Body('driverId', ParseIntPipe) driverId: number
+    @Body('driverId', ParseIntPipe) driverId: number,
   ) {
     if (!file) {
       throw new BadRequestException('No file uploaded');

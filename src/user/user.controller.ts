@@ -10,7 +10,7 @@ export class DriverController {
     return this.driverService.getDriversWithId();
   }
 
-   @Delete(':driverId')
+  @Delete(':driverId')
   remove(@Param('driverId', ParseIntPipe) driverId: number) {
     return this.driverService.deleteByDriverId(driverId);
   }

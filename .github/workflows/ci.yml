@@ -68,6 +68,9 @@ jobs:
         if: ${{ hashFiles('prisma/schema.prisma') != '' }}
         run: npx prisma migrate deploy
 
+      - name: Prettier check
+        run: npm run format:check
+
       - name: Lint
         run: npm run lint --if-present
 

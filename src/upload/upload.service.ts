@@ -23,17 +23,15 @@ export class UploadService {
   constructor(private prisma: PrismaService) {}
 
   async processExcel(file: Express.Multer.File, driverId: number) {
-
     const user = await this.prisma.user.findUnique({
-    where: { 
-      driverId: driverId 
+      where: {
+        driverId: driverId,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException(`Driver with ID ${driverId} not found`);
     }
-  });
-
-  if (!user) {
-    throw new NotFoundException(`Driver with ID ${driverId} not found`);
-  }
-
 
     // Use the user.id (not driverId) for the foreign key relationship
     const actualDriverId = user.id;
@@ -46,72 +44,74 @@ export class UploadService {
     const uploads: UploadRowDto[] = [];
 
     // Process rows in transaction to ensure all or nothing
-    return this.prisma.$transaction(async (prisma) => {
-      for (const row of sheet as any[]) {
-        const barcode = row['Barcode'];
-        const address = row['Address'];
-        const gpsLocation = row['Last GPS location'];
+    return this.prisma.$transaction(
+      async (prisma) => {
+        for (const row of sheet as any[]) {
+          const barcode = row['Barcode'];
+          const address = row['Address'];
+          const gpsLocation = row['Last GPS location'];
 
-        // Get expected Lat/Lng from Address
-        let expectedLat: number | null = null;
-        let expectedLng: number | null = null;
-        
-        try {
-          const geoRes = await axios.get(
-            `https://maps.googleapis.com/maps/api/geocode/json`,
-            { params: { address, key: process.env.GOOGLE_MAPS_API_KEY } }
-          );
-          
-          if (geoRes.data.results?.[0]?.geometry?.location) {
-            expectedLat = geoRes.data.results[0].geometry.location.lat;
-            expectedLng = geoRes.data.results[0].geometry.location.lng;
-          }
-        } catch (error) {
-          console.error('Geocoding error:', error);
-        }
+          // Get expected Lat/Lng from Address
+          let expectedLat: number | null = null;
+          let expectedLng: number | null = null;
 
-        let distanceKm: number | null = null;
-        let status: string | null = null;
-        let googleMapsLink: string | null = null;
-
-        if (gpsLocation && expectedLat && expectedLng) {
           try {
-            const { lat, lng } = parseLatLngSpaceSeparated(gpsLocation);
+            const geoRes = await axios.get(
+              `https://maps.googleapis.com/maps/api/geocode/json`,
+              { params: { address, key: process.env.GOOGLE_MAPS_API_KEY } },
+            );
 
-    const meters = haversine(
-      { lat, lng },
-      { lat: Number(expectedLat), lng: Number(expectedLng) }
-    );
-    distanceKm = meters / 1000; // convert to km
-
-            status = distanceKm > 0.6 ? 'mismatch' : 'match';
-    googleMapsLink = `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${expectedLat},${expectedLng}`;
+            if (geoRes.data.results?.[0]?.geometry?.location) {
+              expectedLat = geoRes.data.results[0].geometry.location.lat;
+              expectedLng = geoRes.data.results[0].geometry.location.lng;
+            }
           } catch (error) {
-            console.error('Distance calculation error:', error);
+            console.error('Geocoding error:', error);
           }
+
+          let distanceKm: number | null = null;
+          let status: string | null = null;
+          let googleMapsLink: string | null = null;
+
+          if (gpsLocation && expectedLat && expectedLng) {
+            try {
+              const { lat, lng } = parseLatLngSpaceSeparated(gpsLocation);
+
+              const meters = haversine(
+                { lat, lng },
+                { lat: Number(expectedLat), lng: Number(expectedLng) },
+              );
+              distanceKm = meters / 1000; // convert to km
+
+              status = distanceKm > 0.6 ? 'mismatch' : 'match';
+              googleMapsLink = `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${expectedLat},${expectedLng}`;
+            } catch (error) {
+              console.error('Distance calculation error:', error);
+            }
+          }
+
+          const saved = await prisma.upload.create({
+            data: {
+              driverId: user.driverId, // Use the user.id here
+              barcode,
+              address,
+              gpsLocation,
+              expectedLat,
+              expectedLng,
+              distanceKm,
+              status,
+              googleMapsLink,
+            },
+          });
+
+          uploads.push(saved);
         }
-
-        const saved = await prisma.upload.create({
-          data: {
-            driverId: user.driverId, // Use the user.id here
-            barcode,
-            address,
-            gpsLocation,
-            expectedLat,
-            expectedLng,
-            distanceKm,
-            status,
-            googleMapsLink,
-          },
-        });
-
-        uploads.push(saved);
-      }
-      return uploads;
-    },
-{
-    maxWait: 500000,    // No maximum wait time
-    timeout: 500000     // No transaction timeout
-  });
+        return uploads;
+      },
+      {
+        maxWait: 500000, // No maximum wait time
+        timeout: 500000, // No transaction timeout
+      },
+    );
   }
 }
