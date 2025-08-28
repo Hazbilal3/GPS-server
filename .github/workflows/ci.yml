@@ -9,9 +9,29 @@ jobs:
   test-build:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: logistics_db
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
     strategy:
       matrix:
-        node-version: [20.x]
+        node-version: ["22.17.x"]
+
+    env:
+      # Make sure this matches your Prisma datasource url
+      DATABASE_URL: postgresql://postgres:password@localhost:5432/logistics_db?schema=public
+      NODE_ENV: test
 
     steps:
       - name: Checkout
@@ -22,14 +42,31 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install PostgreSQL client (for pg_isready/psql)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U postgres && break
+            echo "Postgres is unavailable - sleeping"
+            sleep 2
+          done
 
       - name: Install deps
         run: npm ci
 
-      # If you use Prisma, generate client
       - name: Prisma generate
         if: ${{ hashFiles('prisma/schema.prisma') != '' }}
         run: npx prisma generate
+
+      - name: Apply DB migrations (CI)
+        if: ${{ hashFiles('prisma/schema.prisma') != '' }}
+        run: npx prisma migrate deploy
 
       - name: Lint
         run: npm run lint --if-present
@@ -37,13 +74,20 @@ jobs:
       - name: Unit tests
         run: npm test -- --ci --reporters=default --reporters=jest-junit
         env:
-          NODE_ENV: test
+          JEST_JUNIT_OUTPUT: reports/junit.xml
 
       - name: Build
         run: npm run build
 
-      - name: Upload build artifact
+      - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-report
+          path: reports/junit.xml
