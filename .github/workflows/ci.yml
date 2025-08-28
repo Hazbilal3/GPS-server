@@ -68,6 +68,11 @@ jobs:
         if: ${{ hashFiles('prisma/schema.prisma') != '' }}
         run: npx prisma migrate deploy
 
+      - name: Prettier (enforce project style)
+        run: |
+            npm run format
+            git diff --quiet -- . || { echo "Please commit Prettier formatting (run: npm run format)"; exit 1; }
+
       - name: Prettier check
         run: npm run format:check
 

@@ -1,0 +1,4 @@
+dist/
+node_modules/
+# optionally ignore infra files:
+docker-compose.yml
