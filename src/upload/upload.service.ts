@@ -5,7 +5,7 @@ import haversine from 'haversine-distance';
 import { PrismaService } from 'src/prisma.service';
 import { UploadRowDto } from './dto/upload.dto';
 
-function parseLatLngSpaceSeparated(input) {
+function parseLatLngSpaceSeparated(input: string) {
   const parts = input.trim().split(/\s+/); // split on space(s)
   if (parts.length < 2) {
     throw new Error(`Invalid gpsLocation format: ${input}`);
@@ -18,23 +18,219 @@ function parseLatLngSpaceSeparated(input) {
   return { lat, lng };
 }
 
+/** ===== Helpers for robust geocoding of partial/dirty addresses ===== */
+
+const US_STATE_ABBR = new Set([
+  'AL','AK','AZ','AR','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN','KS','KY',
+  'LA','MA','MD','ME','MI','MN','MO','MS','MT','NC','ND','NE','NH','NJ','NM','NV','NY','OH',
+  'OK','OR','PA','RI','SC','SD','TN','TX','UT','VA','VT','WA','WI','WV','WY','PR','GU','VI','AS','MP','UM'
+]);
+
+function normalizeAddress(raw: string) {
+  if (!raw) return { cleaned: '', zip: null as string | null, state: null as string | null, city: null as string | null };
+
+  let a = String(raw);
+
+  // Remove tokens like "LOCATION-3-6621" or "LOCATION 3 6621"
+  a = a.replace(/\bLOCATION[-\s]*[\w-]+\b/gi, ' ');
+
+  // Convert dots to spaces; normalize commas/spaces
+  a = a.replace(/[.]/g, ' ')
+       .replace(/\s*,\s*/g, ', ')
+       .replace(/\s{2,}/g, ' ')
+       .trim();
+
+  // Extract ZIP (5 or 9)
+  const zipMatch = a.match(/\b\d{5}(?:-\d{4})?\b/);
+  const zip = zipMatch ? zipMatch[0] : null;
+
+  // Extract state (2-letter)
+  const stateMatch = a.match(/\b[A-Z]{2}\b/g);
+  const state = stateMatch ? (stateMatch.find(s => US_STATE_ABBR.has(s.toUpperCase())) ?? null) : null;
+
+  // Heuristic city extraction: token(s) just before state if we have ", City, ST"
+  let city: string | null = null;
+  if (state) {
+    const cityRe = new RegExp(`,\\s*([A-Za-z][A-Za-z\\s.'-]+)\\s*,\\s*${state}\\b`);
+    const m = a.match(cityRe);
+    if (m && m[1]) city = m[1].trim();
+  } else {
+    // If no state, look for "..., City" at the end
+    const m = a.match(/,\s*([A-Za-z][A-Za-z\s.'-]+)\s*$/);
+    if (m && m[1]) city = m[1].trim();
+  }
+
+  // Ensure comma before state
+  if (state) a = a.replace(new RegExp(`\\s${state}\\b`), `, ${state}`);
+  // Ensure a space before ZIP
+  if (zip) a = a.replace(new RegExp(`\\s*${zip}\\b`), ` ${zip}`);
+
+  // Clean double commas
+  a = a.replace(/,\s*,/g, ', ').trim();
+
+  return { cleaned: a, zip, state, city };
+}
+
+function componentsFilter(zip?: string | null, state?: string | null) {
+  const parts = ['country:US'];
+  if (zip) parts.push(`postal_code:${zip}`);
+  if (state) parts.push(`administrative_area:${state}`);
+  return parts.join('|');
+}
+
+function pickBestGeocodeResult(results: any[], zip?: string | null, state?: string | null, city?: string | null) {
+  if (!Array.isArray(results) || results.length === 0) return null;
+
+  const hasZip = (r: any) => zip && r.formatted_address?.includes(zip);
+  const hasState = (r: any) => state && new RegExp(`\\b${state}\\b`).test(r.formatted_address || '');
+  const hasCity = (r: any) => city && new RegExp(`\\b${city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+      .test(r.formatted_address || '');
+  const isStreety = (r: any) =>
+    (r.types || []).includes('street_address') || (r.types || []).includes('premise');
+
+  const scored = results.map((r: any) => {
+    let score = 0;
+    if (hasZip(r)) score += 100;
+    if (hasState(r)) score += 50;
+    if (hasCity(r)) score += 40;
+    if (isStreety(r)) score += 25;
+    // Prefer shorter formatted addresses (slightly)
+    score += Math.max(0, 20 - (r.formatted_address?.length || 0) / 10);
+    return { r, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].r;
+}
+
+type SmartGeo = {
+  lat: number;
+  lng: number;
+  formattedAddress: string;
+  partialMatch: boolean;
+  source: 'geocode' | 'places_find' | 'places_text';
+};
+
+async function geocodeSmart(
+  addressRaw: string,
+  opts?: { gpsBias?: { lat: number; lng: number } }
+): Promise<SmartGeo | null> {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  if (!key) throw new Error('Missing GOOGLE_MAPS_API_KEY');
+
+  const { cleaned, zip, state, city } = normalizeAddress(addressRaw);
+  const allowGpsBias = !zip && !state && !!opts?.gpsBias; // only bias if truly partial (no ZIP & no state)
+
+  // 1) Geocoding API with components bias (authoritative if we have ZIP/State)
+  try {
+    const gcParams: any = { address: cleaned, key, region: 'us' };
+    const comp = componentsFilter(zip, state);
+    if (comp) gcParams.components = comp;
+
+    const geoRes = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+      params: gcParams,
+    });
+
+    const { results, status } = geoRes.data || {};
+    if (status === 'OK' && results?.length) {
+      const best = pickBestGeocodeResult(results, zip, state, city) || results[0];
+      return {
+        lat: best.geometry.location.lat,
+        lng: best.geometry.location.lng,
+        formattedAddress: best.formatted_address,
+        partialMatch: Boolean(best.partial_match),
+        source: 'geocode',
+      };
+    }
+  } catch {
+    // fall through
+  }
+
+  // 2) Places: Find Place From Text (handles partial text well)
+  try {
+    const findParams: any = {
+      input: cleaned,
+      inputtype: 'textquery',
+      fields: 'geometry,formatted_address,place_id',
+      region: 'us',
+      key,
+    };
+    if (allowGpsBias) {
+      const { lat, lng } = opts!.gpsBias!;
+      // Bias around driver GPS if partial
+      findParams.locationbias = `circle:50000@${lat},${lng}`; // 50km bias radius
+    }
+    const findRes = await axios.get(
+      'https://maps.googleapis.com/maps/api/place/findplacefromtext/json',
+      { params: findParams },
+    );
+    const cand = findRes.data?.candidates || [];
+    if (cand.length) {
+      const best = cand[0];
+      return {
+        lat: best.geometry.location.lat,
+        lng: best.geometry.location.lng,
+        formattedAddress: best.formatted_address,
+        partialMatch: false,
+        source: 'places_find',
+      };
+    }
+  } catch {
+    // fall through
+  }
+
+  // 3) Places: Text Search (broadest)
+  try {
+    const txtParams: any = {
+      query: cleaned + (zip ? ` ${zip}` : '') + (state ? ` ${state}` : ''),
+      region: 'us',
+      key,
+    };
+    if (allowGpsBias) {
+      const { lat, lng } = opts!.gpsBias!;
+      txtParams.location = `${lat},${lng}`;
+      txtParams.radius = 50000; // 50km bias
+    }
+    const txtRes = await axios.get(
+      'https://maps.googleapis.com/maps/api/place/textsearch/json',
+      { params: txtParams },
+    );
+    const results = txtRes.data?.results || [];
+    if (results.length) {
+      const r = results[0];
+      return {
+        lat: r.geometry.location.lat,
+        lng: r.geometry.location.lng,
+        formattedAddress: r.formatted_address,
+        partialMatch: false,
+        source: 'places_text',
+      };
+    }
+  } catch {
+    // no-op
+  }
+
+  return null;
+}
+
+/** =================== Upload Service =================== */
+
 @Injectable()
 export class UploadService {
   constructor(private prisma: PrismaService) {}
 
   async processExcel(file: Express.Multer.File, driverId: number) {
     const user = await this.prisma.user.findUnique({
-      where: {
-        driverId: driverId,
-      },
+      where: { driverId },
     });
 
     if (!user) {
       throw new NotFoundException(`Driver with ID ${driverId} not found`);
     }
 
-    // Use the user.id (not driverId) for the foreign key relationship
-    const actualDriverId = user.id;
+    // NOTE: Keep this aligned with your schema (if your Upload FK points to User.driverId, use user.driverId)
+    const fkValue = user.driverId; // <-- use this if Upload.driverId -> User.driverId (Option A schema)
+    // const fkValue = user.id;     // <-- use this if Upload.userId -> User.id (Option B schema)
 
     const workbook = XLSX.read(file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
@@ -43,58 +239,78 @@ export class UploadService {
 
     const uploads: UploadRowDto[] = [];
 
-    // Process rows in transaction to ensure all or nothing
     return this.prisma.$transaction(
       async (prisma) => {
         for (const row of sheet as any[]) {
-          const barcode = row['Barcode'];
-          const address = row['Address'];
-          const gpsLocation = row['Last GPS location'];
+          const barcode: string = row['Barcode'];
+          const addressRaw: string = row['Address'];
+          const gpsLocation: string = row['Last GPS location'];
 
-          // Get expected Lat/Lng from Address
           let expectedLat: number | null = null;
           let expectedLng: number | null = null;
-
-          try {
-            const geoRes = await axios.get(
-              `https://maps.googleapis.com/maps/api/geocode/json`,
-              { params: { address, key: process.env.GOOGLE_MAPS_API_KEY } },
-            );
-
-            if (geoRes.data.results?.[0]?.geometry?.location) {
-              expectedLat = geoRes.data.results[0].geometry.location.lat;
-              expectedLng = geoRes.data.results[0].geometry.location.lng;
-            }
-          } catch (error) {
-            console.error('Geocoding error:', error);
-          }
-
           let distanceKm: number | null = null;
           let status: string | null = null;
           let googleMapsLink: string | null = null;
 
-          if (gpsLocation && expectedLat && expectedLng) {
+          // Try parse GPS once (for bias + distance)
+          let gpsForBias: { lat: number; lng: number } | null = null;
+          if (gpsLocation && String(gpsLocation).trim()) {
             try {
-              const { lat, lng } = parseLatLngSpaceSeparated(gpsLocation);
+              gpsForBias = parseLatLngSpaceSeparated(gpsLocation);
+            } catch {
+              gpsForBias = null;
+            }
+          }
 
+          // Smart geocoding for partial/noisy addresses
+          if (addressRaw && String(addressRaw).trim().length > 0) {
+            try {
+              const geo = await geocodeSmart(addressRaw, { gpsBias: gpsForBias || undefined });
+              if (geo) {
+                expectedLat = geo.lat;
+                expectedLng = geo.lng;
+                status = geo.partialMatch ? 'partial_match' : 'geocoded';
+                // Optional debug:
+                // console.log({ addressRaw, normalized: normalizeAddress(addressRaw), resolved: geo.formattedAddress, source: geo.source });
+              } else {
+                status = 'geocode_zero_results';
+              }
+            } catch (e) {
+              status = 'geocode_error';
+              expectedLat = null;
+              expectedLng = null;
+            }
+          } else {
+            status = 'no_address';
+          }
+
+          // Distance & link (only if both GPS and expected coords exist)
+          if (gpsForBias && expectedLat != null && expectedLng != null) {
+            try {
               const meters = haversine(
-                { lat, lng },
+                { lat: gpsForBias.lat, lng: gpsForBias.lng },
                 { lat: Number(expectedLat), lng: Number(expectedLng) },
               );
-              distanceKm = meters / 1000; // convert to km
+              distanceKm = meters / 1000;
 
+              // Your 0.6 km threshold
               status = distanceKm > 0.6 ? 'mismatch' : 'match';
-              googleMapsLink = `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${expectedLat},${expectedLng}`;
-            } catch (error) {
-              console.error('Distance calculation error:', error);
+
+              googleMapsLink =
+                `https://www.google.com/maps/dir/?api=1&origin=${gpsForBias.lat},${gpsForBias.lng}` +
+                `&destination=${expectedLat},${expectedLng}`;
+            } catch {
+              if (!status) status = 'gps_parse_error';
             }
+          } else if (!gpsLocation && (expectedLat != null && expectedLng != null)) {
+            status = status ?? 'geocoded';
           }
 
           const saved = await prisma.upload.create({
             data: {
-              driverId: user.driverId, // Use the user.id here
+              driverId: fkValue, // <-- align with your FK (see note above)
               barcode,
-              address,
+              address: addressRaw,
               gpsLocation,
               expectedLat,
               expectedLng,
@@ -104,13 +320,14 @@ export class UploadService {
             },
           });
 
-          uploads.push(saved);
+          uploads.push(saved as any);
         }
+
         return uploads;
       },
       {
-        maxWait: 500000, // No maximum wait time
-        timeout: 500000, // No transaction timeout
+        maxWait: 500000,
+        timeout: 500000,
       },
     );
   }
