@@ -18,14 +18,24 @@ export class UploadController {
 
   @Post()
   @UseInterceptors(FileInterceptor('file'))
-  async uploadFile(
+   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body('driverId', ParseIntPipe) driverId: number,
+    @Body('date') date?: string, // <-- optional YYYY-MM-DD (UTC)
   ) {
-    if (!file) {
-      throw new BadRequestException('No file uploaded');
+    if (!file) throw new BadRequestException('No file uploaded');
+
+    if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        throw new BadRequestException('date must be in YYYY-MM-DD format (UTC day)');
+      }
+      const d = new Date(`${date}T00:00:00.000Z`);
+      if (isNaN(d.getTime())) {
+        throw new BadRequestException('Invalid date value');
+      }
     }
-    return this.uploadService.processExcel(file, driverId);
+
+    return this.uploadService.processExcel(file, driverId, date);
   }
 
   @Delete()

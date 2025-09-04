@@ -214,123 +214,114 @@ async function geocodeSmart(
 }
 
 /** =================== Upload Service =================== */
-
+function utcStartOfDay(yyyyMmDd: string) {
+  return new Date(`${yyyyMmDd}T00:00:00.000Z`);
+}
 @Injectable()
 export class UploadService {
   constructor(private prisma: PrismaService) {}
 
-  async processExcel(file: Express.Multer.File, driverId: number) {
-    const user = await this.prisma.user.findUnique({
-      where: { driverId },
-    });
+async processExcel(file: Express.Multer.File, driverId: number, date?: string) {
+  const user = await this.prisma.user.findUnique({ where: { driverId } });
+  if (!user) throw new NotFoundException(`Driver with ID ${driverId} not found`);
 
-    if (!user) {
-      throw new NotFoundException(`Driver with ID ${driverId} not found`);
-    }
+  // Keep aligned with your FK (as you already had)
+  const fkValue = user.driverId;
 
-    // NOTE: Keep this aligned with your schema (if your Upload FK points to User.driverId, use user.driverId)
-    const fkValue = user.driverId; // <-- use this if Upload.driverId -> User.driverId (Option A schema)
-    // const fkValue = user.id;     // <-- use this if Upload.userId -> User.id (Option B schema)
+  const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  const sheet = XLSX.utils.sheet_to_json(worksheet);
 
-    const workbook = XLSX.read(file.buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const sheet = XLSX.utils.sheet_to_json(worksheet);
+  const uploads: UploadRowDto[] = [];
 
-    const uploads: UploadRowDto[] = [];
+  // if a date is provided, we’ll override createdAt to that day’s start (UTC)
+  const createdAtOverride = date ? utcStartOfDay(date) : undefined;
 
-    return this.prisma.$transaction(
-      async (prisma) => {
-        for (const row of sheet as any[]) {
-          const barcode: string = row['Barcode'];
-          const addressRaw: string = row['Address'];
-          const gpsLocation: string = row['Last GPS location'];
+  return this.prisma.$transaction(
+    async (prisma) => {
+      for (const row of sheet as any[]) {
+        const barcode: string = row['Barcode'];
+        const addressRaw: string = row['Address'];
+        const gpsLocation: string = row['Last GPS location'];
 
-          let expectedLat: number | null = null;
-          let expectedLng: number | null = null;
-          let distanceKm: number | null = null;
-          let status: string | null = null;
-          let googleMapsLink: string | null = null;
+        let expectedLat: number | null = null;
+        let expectedLng: number | null = null;
+        let distanceKm: number | null = null;
+        let status: string | null = null;
+        let googleMapsLink: string | null = null;
 
-          // Try parse GPS once (for bias + distance)
-          let gpsForBias: { lat: number; lng: number } | null = null;
-          if (gpsLocation && String(gpsLocation).trim()) {
-            try {
-              gpsForBias = parseLatLngSpaceSeparated(gpsLocation);
-            } catch {
-              gpsForBias = null;
-            }
+        // Try parse GPS once (for bias + distance)
+        let gpsForBias: { lat: number; lng: number } | null = null;
+        if (gpsLocation && String(gpsLocation).trim()) {
+          try {
+            gpsForBias = parseLatLngSpaceSeparated(gpsLocation);
+          } catch {
+            gpsForBias = null;
           }
-
-          // Smart geocoding for partial/noisy addresses
-          if (addressRaw && String(addressRaw).trim().length > 0) {
-            try {
-              const geo = await geocodeSmart(addressRaw, { gpsBias: gpsForBias || undefined });
-              if (geo) {
-                expectedLat = geo.lat;
-                expectedLng = geo.lng;
-                status = geo.partialMatch ? 'partial_match' : 'geocoded';
-                // Optional debug:
-                // console.log({ addressRaw, normalized: normalizeAddress(addressRaw), resolved: geo.formattedAddress, source: geo.source });
-              } else {
-                status = 'geocode_zero_results';
-              }
-            } catch (e) {
-              status = 'geocode_error';
-              expectedLat = null;
-              expectedLng = null;
-            }
-          } else {
-            status = 'no_address';
-          }
-
-          // Distance & link (only if both GPS and expected coords exist)
-          if (gpsForBias && expectedLat != null && expectedLng != null) {
-            try {
-              const meters = haversine(
-                { lat: gpsForBias.lat, lng: gpsForBias.lng },
-                { lat: Number(expectedLat), lng: Number(expectedLng) },
-              );
-              distanceKm = meters / 1000;
-
-              // Your 0.6 km threshold
-              status = distanceKm > 0.6 ? 'mismatch' : 'match';
-
-              googleMapsLink =
-                `https://www.google.com/maps/dir/?api=1&origin=${gpsForBias.lat},${gpsForBias.lng}` +
-                `&destination=${expectedLat},${expectedLng}`;
-            } catch {
-              if (!status) status = 'gps_parse_error';
-            }
-          } else if (!gpsLocation && (expectedLat != null && expectedLng != null)) {
-            status = status ?? 'geocoded';
-          }
-
-          const saved = await prisma.upload.create({
-            data: {
-              driverId: fkValue, // <-- align with your FK (see note above)
-              barcode,
-              address: addressRaw,
-              gpsLocation,
-              expectedLat,
-              expectedLng,
-              distanceKm,
-              status,
-              googleMapsLink,
-            },
-          });
-
-          uploads.push(saved as any);
         }
 
-        return uploads;
-      },
-      {
-        maxWait: 500000,
-        timeout: 500000,
-      },
-    );
-  }
+        // Smart geocoding for partial/noisy addresses
+        if (addressRaw && String(addressRaw).trim().length > 0) {
+          try {
+            const geo = await geocodeSmart(addressRaw, { gpsBias: gpsForBias || undefined });
+            if (geo) {
+              expectedLat = geo.lat;
+              expectedLng = geo.lng;
+              status = geo.partialMatch ? 'partial_match' : 'geocoded';
+            } else {
+              status = 'geocode_zero_results';
+            }
+          } catch {
+            status = 'geocode_error';
+            expectedLat = null;
+            expectedLng = null;
+          }
+        } else {
+          status = 'no_address';
+        }
+
+        // Distance & link
+        if (gpsForBias && expectedLat != null && expectedLng != null) {
+          try {
+            const meters = haversine(
+              { lat: gpsForBias.lat, lng: gpsForBias.lng },
+              { lat: Number(expectedLat), lng: Number(expectedLng) },
+            );
+            distanceKm = meters / 1000;
+            status = distanceKm > 0.6 ? 'mismatch' : 'match';
+            googleMapsLink =
+              `https://www.google.com/maps/dir/?api=1&origin=${gpsForBias.lat},${gpsForBias.lng}` +
+              `&destination=${expectedLat},${expectedLng}`;
+          } catch {
+            if (!status) status = 'gps_parse_error';
+          }
+        } else if (!gpsLocation && (expectedLat != null && expectedLng != null)) {
+          status = status ?? 'geocoded';
+        }
+
+        const saved = await prisma.upload.create({
+          data: {
+            driverId: fkValue,
+            barcode,
+            address: addressRaw,
+            gpsLocation,
+            expectedLat,
+            expectedLng,
+            distanceKm,
+            status,
+            googleMapsLink,
+            ...(createdAtOverride ? { createdAt: createdAtOverride } : {}), // <-- set the date
+          },
+        });
+
+        uploads.push(saved as any);
+      }
+      return uploads;
+    },
+    { maxWait: 500000, timeout: 500000 },
+  );
+}
 
 
  async deleteByDriverAndDate(driverId: number, dateStr: string) {
