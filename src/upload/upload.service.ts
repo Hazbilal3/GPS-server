@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import * as XLSX from 'xlsx';
 import axios from 'axios';
 import haversine from 'haversine-distance';
@@ -331,4 +331,37 @@ export class UploadService {
       },
     );
   }
+
+
+ async deleteByDriverAndDate(driverId: number, dateStr: string) {
+    const { start, end } = getUtcDayBounds(dateStr);
+
+    // If Upload.driverId references User.driverId, this is fine.
+    // If your Upload model uses userId (FK to User.id), switch filter to { userId: <id> }.
+    const result = await this.prisma.upload.deleteMany({
+      where: {
+        driverId,                 // <-- change to userId if your FK is userId
+        createdAt: { gte: start, lt: end },
+      },
+    });
+
+    return {
+      driverId,
+      date: dateStr,
+      deleted: result.count,
+    };
+  }
+}
+
+/** Helpers */
+function getUtcDayBounds(yyyyMmDd: string) {
+  // Treat the provided date as a UTC calendar day
+  const start = new Date(`${yyyyMmDd}T00:00:00.000Z`);
+  const end = new Date(`${yyyyMmDd}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() + 1); // next day start (exclusive)
+  if (isNaN(start.getTime())) {
+    throw new BadRequestException('Invalid date');
+  }
+  return { start, end };
+
 }
