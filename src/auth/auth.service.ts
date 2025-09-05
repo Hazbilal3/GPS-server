@@ -268,6 +268,7 @@ export class AuthService {
         data: {
           adminId: dto.adminId,
           fullName: dto.fullName,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           phoneNumber: dto.phoneNumber,
           email: dto.email,
           password: hashedPassword,
@@ -318,6 +319,7 @@ export class AuthService {
       accessToken: this.jwtService.sign(payload),
       user: {
         id: user.id,
+        name : user.fullName,
         email: user.email,
         role: user.userRole,
         driverId: user.driverId,
