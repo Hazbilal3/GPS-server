@@ -289,7 +289,7 @@ async processExcel(file: Express.Multer.File, driverId: number, date?: string) {
               { lat: Number(expectedLat), lng: Number(expectedLng) },
             );
             distanceKm = meters /1000;
-            status = distanceKm > 0.02 ? 'mismatch' : 'match';
+            status = distanceKm > 0.015 ? 'mismatch' : 'match';
             googleMapsLink =
               `https://www.google.com/maps/dir/?api=1&origin=${gpsForBias.lat},${gpsForBias.lng}` +
               `&destination=${expectedLat},${expectedLng}`;
