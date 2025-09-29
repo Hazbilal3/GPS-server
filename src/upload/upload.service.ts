@@ -332,10 +332,10 @@ export class UploadService {
         for (const row of sheet as any[]) {
           let barcodeVal = row['Barcode'];
           if (typeof barcodeVal === 'number') {
-            // Force no decimals, full precision string
             barcodeVal = barcodeVal.toFixed(0);
           }
           const barcode = String(barcodeVal);
+          console.log('BARCODE VALUE:', barcode);
 
           const addressRaw= String(row['Address']);
           const gpsLocation= String(row['Last GPS location']);
