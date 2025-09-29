@@ -404,7 +404,7 @@ export class UploadService {
           const saved = await prisma.upload.create({
             data: {
               driverId: fkValue,
-              barcode,
+              barcode : barcode,
               address: addressRaw,
               gpsLocation,
               expectedLat,
