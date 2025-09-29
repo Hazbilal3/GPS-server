@@ -330,7 +330,13 @@ export class UploadService {
     return this.prisma.$transaction(
       async (prisma) => {
         for (const row of sheet as any[]) {
-          const barcode= String(row['Barcode']);
+          let barcodeVal = row['Barcode'];
+          if (typeof barcodeVal === 'number') {
+            // Force no decimals, full precision string
+            barcodeVal = barcodeVal.toFixed(0);
+          }
+          const barcode = String(barcodeVal);
+
           const addressRaw= String(row['Address']);
           const gpsLocation= String(row['Last GPS location']);
 
