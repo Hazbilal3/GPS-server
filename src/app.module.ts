@@ -10,6 +10,8 @@ import { ReportService } from './report/report.service';
 import { APP_PIPE } from '@nestjs/core';
 import { DriverController } from './user/user.controller';
 import { DriverService } from './user/user.service';
+import { AirtableService } from './airtable/airtable.service';
+import { AirtableController } from './airtable/airtable.controller';
 
 @Module({
   // eslint-disable-next-line prettier/prettier
@@ -19,6 +21,7 @@ import { DriverService } from './user/user.service';
     ReportController,
     DriverController,
     DriverController,
+    AirtableController,
   ],
   providers: [
     UploadService,
@@ -26,6 +29,7 @@ import { DriverService } from './user/user.service';
     PrismaService,
     ReportService,
     DriverService,
+    AirtableService,
     {
       provide: APP_PIPE,
       useClass: ValidationPipe, // Add global validation pipe
