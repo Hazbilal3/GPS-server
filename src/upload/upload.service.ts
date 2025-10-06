@@ -335,11 +335,12 @@ export class UploadService {
             barcodeVal = barcodeVal.toFixed(0);
           }
           const barcode = String(barcodeVal);
-          console.log('BARCODE VALUE:', barcode);
 
           const addressRaw= String(row['Address']);
           const gpsLocation= String(row['Last GPS location']);
-
+          const sequenceNo = String(row['Seq No']);
+          const lastEvent = String(row['Last Event']);
+          const lastEventTime = String(row['Last Event time']);
           let expectedLat: number | null = null;
           let expectedLng: number | null = null;
           let distanceKm: number | null = null;
@@ -411,6 +412,9 @@ export class UploadService {
             data: {
               driverId: fkValue,
               barcode : barcode,
+              sequenceNo : sequenceNo,
+              lastevent : lastEvent,
+              lasteventdata : lastEventTime,
               address: addressRaw,
               gpsLocation,
               expectedLat,
