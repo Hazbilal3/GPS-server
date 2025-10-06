@@ -30,6 +30,9 @@ model Upload {
   driverId Int?   // Should match User.driverId type
   user     User?  @relation(fields: [driverId], references: [driverId])
   barcode        String
+  sequenceNo  String?
+  lastevent   String?
+  lasteventdata String?
   address        String
   gpsLocation    String?
   expectedLat    Float?
