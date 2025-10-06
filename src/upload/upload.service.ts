@@ -390,7 +390,7 @@ export class UploadService {
               };
 
               // returns meters
-              const distanceKm = haversineDistance(start, end);
+              distanceKm = haversineDistance(start, end);
 
               status = distanceKm > 15 ? 'mismatch' : 'match';
 
@@ -419,7 +419,7 @@ export class UploadService {
               gpsLocation,
               expectedLat,
               expectedLng,
-              distanceKm,
+              distanceKm : distanceKm,
               status,
               googleMapsLink,
               ...(createdAtOverride ? { createdAt: createdAtOverride } : {}), // <-- set the date
