@@ -334,7 +334,7 @@ export interface PayrollRecord {
   salaryType?: string;
   stopsCompleted: number;
   totalDeliveries: number;
-  stopRate: number;
+  // stopRate: number;
   rate?: number;
   amount: number;
   zipBreakdown?: { zip: string; stops: number; rate: number; amount: number }[];
@@ -641,8 +641,8 @@ export class UploadService {
           zipCode: Object.keys(uploadsByZip).join(', '),
           totalDeliveries: totalStops,
           stopsCompleted: totalStops,
-          stopRate:
-            zipBreakdown.length > 0 ? totalStops * zipBreakdown[0].rate : 0,
+          // stopRate:
+          //   zipBreakdown.length > 0 ? totalStops * zipBreakdown[0].rate : 0,
           amount: Number(totalAmount.toFixed(2)),
           zipBreakdown,
         });
