@@ -68,7 +68,9 @@ export class DriverService {
       throw new BadRequestException('driverId is required');
     }
     if (!fullName || !phoneNumber || !email || !password) {
-      throw new BadRequestException('fullName, phoneNumber, email, and password are required');
+      throw new BadRequestException(
+        'fullName, phoneNumber, email, and password are required',
+      );
     }
 
     // Check uniqueness (optional but helpful before hitting DB unique constraints)

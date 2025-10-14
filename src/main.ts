@@ -18,23 +18,22 @@ async function bootstrap() {
       'https://www.expeditedtransport.net',
       'http://localhost:5173',
       'http://localhost:5174',
-
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type'],
   });
 
-  new ValidationPipe({
-    transform: true,
-    transformOptions: {
-      enableImplicitConversion: true,
-    },
-  });
-  app.useGlobalPipes(new ValidationPipe());
-  // await app.listen(process.env.PORT || 3000);
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+    }),
+  );
 
-  const port = Number(process.env.PORT ?? '3010'); // default to 3010
+  const port = Number(process.env.PORT ?? '3010');
   await app.listen(port, '0.0.0.0');
 }
 void bootstrap();

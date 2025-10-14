@@ -319,7 +319,7 @@ export class AuthService {
       accessToken: this.jwtService.sign(payload),
       user: {
         id: user.id,
-        name : user.fullName,
+        name: user.fullName,
         email: user.email,
         role: user.userRole,
         driverId: user.driverId,

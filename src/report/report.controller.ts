@@ -6,6 +6,7 @@ import { ApiQuery, ApiResponse } from '@nestjs/swagger';
 @Controller('report')
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
+
   @Get()
   @ApiQuery({ name: 'driverId', required: false, type: Number })
   @ApiQuery({ name: 'date', required: false, type: String })
@@ -29,6 +30,7 @@ export class ReportController {
     };
     return this.reportService.getUploadReport(parsed);
   }
+
   @Get('export')
   async exportReport(
     @Query() filters: ReportFilterDto,

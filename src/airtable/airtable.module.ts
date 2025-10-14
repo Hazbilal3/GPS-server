@@ -4,9 +4,7 @@ import { AirtableController } from './airtable.controller';
 import { AirtableService } from './airtable.service';
 
 @Module({
-  imports: [
-
-  ],
+  imports: [],
   providers: [AirtableService],
   controllers: [AirtableController],
 })

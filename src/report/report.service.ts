@@ -3,13 +3,13 @@ import { PrismaService } from '../prisma.service';
 import { ReportFilterDto } from './dto/report.dto';
 import { Response } from 'express';
 import { parse } from 'json2csv';
-import { Prisma, Upload } from '@prisma/client';
-import { DateTime } from 'luxon';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class ReportService {
   constructor(private prisma: PrismaService) {}
   private MAX_EXPORT_LIMIT = 10000;
+
   async getUploadReport(filters: ReportFilterDto & { isExport?: boolean }) {
     // Convert and validate pagination parameters
     const page = filters.page ? Number(filters.page) : 1;
@@ -55,6 +55,7 @@ export class ReportService {
       throw new BadRequestException('Failed to fetch report data');
     }
   }
+
   async exportToCsv(filters: ReportFilterDto, res: Response) {
     const { page, limit, ...exportFilters } = filters;
     try {
@@ -107,15 +108,15 @@ export class ReportService {
         { label: 'Status', value: 'status' },
         {
           label: 'Created At',
-          value: (row: any) => row.createdAt.toISOString(),
+          value: (row) => row.createdAt.toISOString(),
         },
         {
           label: 'Driver Name',
-          value: (row: any) => row.user?.fullName.trim(),
+          value: (row) => row.user?.fullName.trim(),
         },
         {
           label: 'Driver Email',
-          value: (row: any) => row.user?.email || '',
+          value: (row) => row.user?.email || '',
         },
         { label: 'GPS Location', value: 'gpsLocation' },
         { label: 'Expected Latitude', value: 'expectedLat' },
@@ -131,6 +132,7 @@ export class ReportService {
       throw new BadRequestException('Failed to generate CSV export');
     }
   }
+
   private buildWhereClause(
     filters: Omit<ReportFilterDto, 'page' | 'limit'>,
   ): Prisma.UploadWhereInput {

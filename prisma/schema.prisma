@@ -8,31 +8,32 @@ datasource db {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  driverId  Int?     @unique
-  email     String   @unique
-  password  String
-  userRole  Int
-  adminId  Int?
-  fullName String?
-  phoneNumber String?  @unique  @db.VarChar(20)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  exports   Export[]
-  uploads   Upload[]
-  resetCodeHash       String?      // hashed code
-  resetCodeExpiresAt  DateTime?    // when the code expires
-  resetCodeAttempts   Int      @default(0)
+  id                 Int       @id @default(autoincrement())
+  driverId           Int?      @unique
+  email              String    @unique
+  password           String
+  userRole           Int
+  adminId            Int?
+  fullName           String?
+  phoneNumber        String?   @unique @db.VarChar(20)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  exports            Export[]
+  uploads            Upload[]
+  payrolls           Payroll[]
+  resetCodeHash      String? // hashed code
+  resetCodeExpiresAt DateTime? // when the code expires
+  resetCodeAttempts  Int       @default(0)
 }
 
 model Upload {
-  id       Int    @id @default(autoincrement())
-  driverId Int?   // Should match User.driverId type
-  user     User?  @relation(fields: [driverId], references: [driverId])
+  id             Int      @id @default(autoincrement())
+  driverId       Int? // Should match User.driverId type
+  user           User?    @relation(fields: [driverId], references: [driverId])
   barcode        String
-  sequenceNo  String?
-  lastevent   String?
-  lasteventdata String?
+  sequenceNo     String?
+  lastevent      String?
+  lasteventdata  String?
   address        String
   gpsLocation    String?
   expectedLat    Float?
@@ -62,4 +63,42 @@ model Export {
   updatedAt      DateTime @updatedAt
   user           User     @relation(fields: [driverId], references: [id])
   upload         Upload?  @relation(fields: [uploadId], references: [id])
+}
+
+model Payroll {
+  id              Int      @id @default(autoincrement())
+  driverId        Int
+  driverName      String
+  zipCode         String?
+  address         String?
+  weekNumber      Int?
+  payPeriod       String?
+  salaryType      String?
+  stopsCompleted  Int
+  totalDeliveries Int?
+  stopRate        Float
+  rate            Float?
+  amount          Float
+  createdAt       DateTime @default(now())
+
+  driver User @relation(fields: [driverId], references: [driverId])
+}
+
+model Route {
+  id                        Int      @id @default(autoincrement())
+  routeNumber               String?  @map("route_number") // e.g. '222'
+  description               String   @map("description") // e.g. 'PAWCUTUCK'
+  ratePerStop               Float    @map("rate_per_stop") // e.g. 2.35
+  zone                      String?  @map("zone") // e.g. 'Zone B'
+  status                    String?  @map("status") // e.g. 'Active'
+  baseRate                  Float?  @map("base_rate") // e.g. 'Active'
+  baseRateCompanyVehicle    Float?  @map("base_rate_company_vehicle") // e.g. 'Active'
+  schedule                  String[] @map("schedule") // array of weekdays
+  zipCode                   String[] @map("zip_code") // array of ZIPs ['6379']
+  dayOfTheWeek              String?  @map("day_of_the_week") // e.g. 'Tuesday'
+  routeScheduledForToday    String?  @map("route_scheduled_for_today") // e.g. 'Yes'
+  ratePerStopCompanyVehicle Float?   @map("rate_per_stop_company_vehicle") // e.g. 2
+  route                     String?  @map("route") // e.g. '222 (PAWCUTUCK)'
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 }

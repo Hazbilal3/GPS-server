@@ -1,5 +1,5 @@
 // auth/auth.controller.ts
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Post } from '@nestjs/common';
 import { AirtableService } from './airtable.service';
 
 @Controller('airtable')
@@ -23,6 +23,11 @@ export class AirtableController {
 
   @Get('routes')
   routes() {
-    return this.airtableService.Routes();
+    return this.airtableService.routes();
+  }
+
+  @Post('customRoutes')
+  customRoutes() {
+    return this.airtableService.customroutes();
   }
 }

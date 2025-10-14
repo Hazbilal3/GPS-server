@@ -32,7 +32,7 @@ import { AirtableController } from './airtable/airtable.controller';
     AirtableService,
     {
       provide: APP_PIPE,
-      useClass: ValidationPipe, // Add global validation pipe
+      useClass: ValidationPipe,
     },
   ],
 })

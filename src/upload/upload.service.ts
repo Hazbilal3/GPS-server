@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   BadRequestException,
   Injectable,
@@ -8,9 +11,12 @@ import axios from 'axios';
 import haversineDistance from 'haversine-distance';
 import { PrismaService } from 'src/prisma.service';
 import { UploadRowDto } from './dto/upload.dto';
+import { AirtableController } from 'src/airtable/airtable.controller';
+import { AirtableService } from 'src/airtable/airtable.service';
+import { Prisma } from '@prisma/client';
 
 function parseLatLngSpaceSeparated(input: string) {
-  const parts = input.trim().split(/\s+/); // split on space(s)
+  const parts = input.trim().split(/\s+/);
   if (parts.length < 2) {
     throw new Error(`Invalid gpsLocation format: ${input}`);
   }
@@ -21,8 +27,6 @@ function parseLatLngSpaceSeparated(input: string) {
   }
   return { lat, lng };
 }
-
-/** ===== Helpers for robust geocoding of partial/dirty addresses ===== */
 
 const US_STATE_ABBR = new Set([
   'AL',
@@ -98,24 +102,20 @@ function normalizeAddress(raw: string) {
   // Remove tokens like "LOCATION-3-6621" or "LOCATION 3 6621"
   a = a.replace(/\bLOCATION[-\s]*[\w-]+\b/gi, ' ');
 
-  // Convert dots to spaces; normalize commas/spaces
   a = a
     .replace(/[.]/g, ' ')
     .replace(/\s*,\s*/g, ', ')
     .replace(/\s{2,}/g, ' ')
     .trim();
 
-  // Extract ZIP (5 or 9)
   const zipMatch = a.match(/\b\d{5}(?:-\d{4})?\b/);
   const zip = zipMatch ? zipMatch[0] : null;
 
-  // Extract state (2-letter)
   const stateMatch = a.match(/\b[A-Z]{2}\b/g);
   const state = stateMatch
     ? (stateMatch.find((s) => US_STATE_ABBR.has(s.toUpperCase())) ?? null)
     : null;
 
-  // Heuristic city extraction: token(s) just before state if we have ", City, ST"
   let city: string | null = null;
   if (state) {
     const cityRe = new RegExp(
@@ -124,17 +124,13 @@ function normalizeAddress(raw: string) {
     const m = a.match(cityRe);
     if (m && m[1]) city = m[1].trim();
   } else {
-    // If no state, look for "..., City" at the end
     const m = a.match(/,\s*([A-Za-z][A-Za-z\s.'-]+)\s*$/);
     if (m && m[1]) city = m[1].trim();
   }
 
-  // Ensure comma before state
   if (state) a = a.replace(new RegExp(`\\s${state}\\b`), `, ${state}`);
-  // Ensure a space before ZIP
   if (zip) a = a.replace(new RegExp(`\\s*${zip}\\b`), ` ${zip}`);
 
-  // Clean double commas
   a = a.replace(/,\s*,/g, ', ').trim();
 
   return { cleaned: a, zip, state, city };
@@ -174,7 +170,6 @@ function pickBestGeocodeResult(
     if (hasState(r)) score += 50;
     if (hasCity(r)) score += 40;
     if (isStreety(r)) score += 25;
-    // Prefer shorter formatted addresses (slightly)
     score += Math.max(0, 20 - (r.formatted_address?.length || 0) / 10);
     return { r, score };
   });
@@ -199,9 +194,8 @@ async function geocodeSmart(
   if (!key) throw new Error('Missing GOOGLE_MAPS_API_KEY');
 
   const { cleaned, zip, state, city } = normalizeAddress(addressRaw);
-  const allowGpsBias = !zip && !state && !!opts?.gpsBias; // only bias if truly partial (no ZIP & no state)
+  const allowGpsBias = !zip && !state && !!opts?.gpsBias;
 
-  // 1) Geocoding API with components bias (authoritative if we have ZIP/State)
   try {
     const gcParams: any = { address: cleaned, key, region: 'us' };
     const comp = componentsFilter(zip, state);
@@ -226,11 +220,8 @@ async function geocodeSmart(
         source: 'geocode',
       };
     }
-  } catch {
-    // fall through
-  }
+  } catch {}
 
-  // 2) Places: Find Place From Text (handles partial text well)
   try {
     const findParams: any = {
       input: cleaned,
@@ -241,8 +232,7 @@ async function geocodeSmart(
     };
     if (allowGpsBias) {
       const { lat, lng } = opts!.gpsBias!;
-      // Bias around driver GPS if partial
-      findParams.locationbias = `circle:50000@${lat},${lng}`; // 50km bias radius
+      findParams.locationbias = `circle:50000@${lat},${lng}`;
     }
     const findRes = await axios.get(
       'https://maps.googleapis.com/maps/api/place/findplacefromtext/json',
@@ -259,11 +249,8 @@ async function geocodeSmart(
         source: 'places_find',
       };
     }
-  } catch {
-    // fall through
-  }
+  } catch {}
 
-  // 3) Places: Text Search (broadest)
   try {
     const txtParams: any = {
       query: cleaned + (zip ? ` ${zip}` : '') + (state ? ` ${state}` : ''),
@@ -290,20 +277,76 @@ async function geocodeSmart(
         source: 'places_text',
       };
     }
-  } catch {
-    // no-op
-  }
+  } catch {}
 
   return null;
 }
 
-/** =================== Upload Service =================== */
 function utcStartOfDay(yyyyMmDd: string) {
   return new Date(`${yyyyMmDd}T00:00:00.000Z`);
 }
+
+function zipFilter(address: string): string | null {
+  if (!address) return null;
+  const match = address.match(/\b\d{5}(?:-\d{4})?\b/);
+  return match ? match[0] : null;
+}
+
+function groupUploadsByWeek(uploads: any[]): Record<string, any[]> {
+  const result: Record<string, any[]> = {};
+  for (const upload of uploads) {
+    const date = new Date(upload.createdAt);
+    const week = getISOWeek(date);
+    if (!result[week]) result[week] = [];
+    result[week].push(upload);
+  }
+  return result;
+}
+
+function getISOWeek(date: Date): number {
+  const tempDate = new Date(
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
+  );
+  const dayNum = tempDate.getUTCDay() || 7;
+  tempDate.setUTCDate(tempDate.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(tempDate.getUTCFullYear(), 0, 1));
+  return Math.ceil(
+    ((tempDate.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
+  );
+}
+
+function getWeekDateRange(weekNumber: number): string {
+  const year = new Date().getFullYear();
+  const firstDayOfYear = new Date(year, 0, 1);
+  const daysOffset = (weekNumber - 1) * 7;
+  const start = new Date(firstDayOfYear.getTime() + daysOffset * 86400000);
+  const end = new Date(start.getTime() + 6 * 86400000);
+  return `${start.toISOString().slice(0, 10)} - ${end.toISOString().slice(0, 10)}`;
+}
+
+export interface PayrollRecord {
+  driverId: number | null;
+  driverName: string;
+  zipCode: string;
+  address?: string;
+  weekNumber?: number;
+  payPeriod?: string;
+  salaryType?: string;
+  stopsCompleted: number;
+  totalDeliveries: number;
+  stopRate: number;
+  rate?: number;
+  amount: number;
+  zipBreakdown?: { zip: string; stops: number; rate: number; amount: number }[];
+  createdAt?: Date;
+}
+
 @Injectable()
 export class UploadService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private airtable: AirtableService,
+  ) {}
 
   async processExcel(
     file: Express.Multer.File,
@@ -314,7 +357,6 @@ export class UploadService {
     if (!user)
       throw new NotFoundException(`Driver with ID ${driverId} not found`);
 
-    // Keep aligned with your FK (as you already had)
     const fkValue = user.driverId;
 
     const workbook = XLSX.read(file.buffer, { type: 'buffer' });
@@ -324,7 +366,6 @@ export class UploadService {
 
     const uploads: UploadRowDto[] = [];
 
-    // if a date is provided, we’ll override createdAt to that day’s start (UTC)
     const createdAtOverride = date ? utcStartOfDay(date) : undefined;
 
     return this.prisma.$transaction(
@@ -336,8 +377,8 @@ export class UploadService {
           }
           const barcode = String(barcodeVal);
 
-          const addressRaw= String(row['Address']);
-          const gpsLocation= String(row['Last GPS location']);
+          const addressRaw = String(row['Address']);
+          const gpsLocation = String(row['Last GPS location']);
           const sequenceNo = String(row['Seq No']);
           const lastEvent = String(row['Last Event']);
           const lastEventTime = String(row['Last Event time']);
@@ -347,7 +388,6 @@ export class UploadService {
           let status: string | null = null;
           let googleMapsLink: string | null = null;
 
-          // Try parse GPS once (for bias + distance)
           let gpsForBias: { lat: number; lng: number } | null = null;
           if (gpsLocation && String(gpsLocation).trim()) {
             try {
@@ -357,7 +397,6 @@ export class UploadService {
             }
           }
 
-          // Smart geocoding for partial/noisy addresses
           if (addressRaw && String(addressRaw).trim().length > 0) {
             try {
               const geo = await geocodeSmart(addressRaw, {
@@ -379,17 +418,14 @@ export class UploadService {
             status = 'no_address';
           }
 
-          // Distance & link
           if (gpsForBias && expectedLat != null && expectedLng != null) {
             try {
-              // haversine-distance expects { lat, lon } (NOT lng) or [lat, lon]
               const start = { lat: gpsForBias.lat, lon: gpsForBias.lng };
               const end = {
                 lat: Number(expectedLat),
                 lon: Number(expectedLng),
               };
 
-              // returns meters
               distanceKm = haversineDistance(start, end);
 
               status = distanceKm > 15 ? 'mismatch' : 'match';
@@ -411,18 +447,18 @@ export class UploadService {
           const saved = await prisma.upload.create({
             data: {
               driverId: fkValue,
-              barcode : barcode,
-              sequenceNo : sequenceNo,
-              lastevent : lastEvent,
-              lasteventdata : lastEventTime,
+              barcode: barcode,
+              sequenceNo: sequenceNo,
+              lastevent: lastEvent,
+              lasteventdata: lastEventTime,
               address: addressRaw,
               gpsLocation,
               expectedLat,
               expectedLng,
-              distanceKm : distanceKm,
+              distanceKm: distanceKm,
               status,
               googleMapsLink,
-              ...(createdAtOverride ? { createdAt: createdAtOverride } : {}), // <-- set the date
+              ...(createdAtOverride ? { createdAt: createdAtOverride } : {}),
             },
           });
 
@@ -437,11 +473,9 @@ export class UploadService {
   async deleteByDriverAndDate(driverId: number, dateStr: string) {
     const { start, end } = getUtcDayBounds(dateStr);
 
-    // If Upload.driverId references User.driverId, this is fine.
-    // If your Upload model uses userId (FK to User.id), switch filter to { userId: <id> }.
     const result = await this.prisma.upload.deleteMany({
       where: {
-        driverId, // <-- change to userId if your FK is userId
+        driverId,
         createdAt: { gte: start, lt: end },
       },
     });
@@ -452,14 +486,195 @@ export class UploadService {
       deleted: result.count,
     };
   }
+
+  async getDriverPayroll(): Promise<PayrollRecord[]> {
+    const [airtableDrivers, airtableRoutes] = await Promise.all([
+      this.getAirtableDrivers(),
+      this.getAirtableRoutes(),
+    ]);
+
+    console.log('✅ Sample route:', airtableRoutes[0]);
+
+    const dbDrivers = await this.prisma.user.findMany({
+      select: { driverId: true, fullName: true },
+    });
+
+    const uploads = await this.prisma.upload.findMany({
+      select: {
+        address: true,
+        driverId: true,
+        lastevent: true,
+        createdAt: true,
+      },
+    });
+
+    const payrollData: PayrollRecord[] = [];
+
+    // --- helpers ---
+    const normalizeZip = (zip?: string): string | null => {
+      if (!zip) return null;
+      const match = zip.match(/\d{4,5}/); // match 4 or 5 digits
+      if (!match) return null;
+      let z = match[0];
+      if (z.length === 4) z = '0' + z; // pad leading zero if missing
+      return z;
+    };
+
+    const extractRouteZips = (route: any): string[] => {
+      if (!route.zipCode) return [];
+      const raw = Array.isArray(route.zipCode)
+        ? route.zipCode
+        : String(route.zipCode).split(/[, ]+/);
+      return raw
+        .map((z) => normalizeZip(String(z)))
+        .filter(Boolean) as string[];
+    };
+
+    // --- main loop ---
+    for (const driver of dbDrivers) {
+      const driverId = driver.driverId;
+      const driverName = driver.fullName;
+
+      const airtableDriver = airtableDrivers.find(
+        (d) => d['OFID Number'] === driverId,
+      );
+      if (!airtableDriver) continue;
+
+      const isCompanyVehicle = (airtableDriver.SalaryType || '')
+        .toLowerCase()
+        .includes('company');
+
+      const driverUploads = uploads.filter(
+        (u) =>
+          u.driverId === driverId && u.lastevent?.toLowerCase() === 'delivered',
+      );
+      if (driverUploads.length === 0) continue;
+
+      const uploadsByWeek = groupUploadsByWeek(driverUploads);
+
+      for (const [weekNumber, weekUploads] of Object.entries(uploadsByWeek)) {
+        const totalStops = weekUploads.length;
+
+        const uploadsByZip: Record<string, number> = {};
+        for (const upload of weekUploads) {
+          const zip = normalizeZip(zipFilter(upload.address) || undefined);
+          if (!zip) continue;
+          uploadsByZip[zip] = (uploadsByZip[zip] || 0) + 1;
+        }
+
+        let totalAmount = 0;
+        const zipBreakdown: {
+          zip: string;
+          stops: number;
+          rate: number;
+          amount: number;
+          matched: boolean;
+        }[] = [];
+
+        for (const [zip, stopCount] of Object.entries(uploadsByZip)) {
+          const route = airtableRoutes.find((r) => {
+            const routeZips = extractRouteZips(r);
+            return routeZips.includes(zip);
+          });
+
+          let rate = 0;
+          let amount = 0;
+          let matched = false;
+
+          if (route) {
+            // ✅ Exact match found
+            rate = isCompanyVehicle
+              ? Number(route.ratePerStopCompanyVehicle) || 0
+              : Number(route.ratePerStop) || 0;
+            matched = true;
+          } else {
+            // ⚠️ No direct match — try fallback strategy
+
+            // 1️⃣ Try to find nearby route (same first 3 digits)
+            const prefix = zip.slice(0, 3);
+            const nearbyRoute = airtableRoutes.find((r) => {
+              const routeZips = extractRouteZips(r);
+              return routeZips.some((z) => z.startsWith(prefix));
+            });
+
+            if (nearbyRoute) {
+              rate = isCompanyVehicle
+                ? Number(nearbyRoute.ratePerStopCompanyVehicle) || 0
+                : Number(nearbyRoute.ratePerStop) || 0;
+              console.warn(
+                `⚠️ Used nearby ZIP match for ${zip} → ${extractRouteZips(nearbyRoute).join(', ')}`,
+              );
+            } else {
+              // 2️⃣ No nearby match — use global average
+              const avgRate =
+                airtableRoutes.reduce(
+                  (acc, r) =>
+                    acc +
+                    (isCompanyVehicle
+                      ? Number(r.ratePerStopCompanyVehicle) || 0
+                      : Number(r.ratePerStop) || 0),
+                  0,
+                ) / (airtableRoutes.length || 1);
+              rate = Number(avgRate.toFixed(2));
+              console.warn(`⚠️ Used average rate for ZIP ${zip}: ${rate}`);
+            }
+          }
+
+          amount = stopCount * rate;
+          totalAmount += amount;
+
+          zipBreakdown.push({
+            zip,
+            stops: stopCount,
+            rate: Number(rate.toFixed(2)),
+            amount: Number(amount.toFixed(2)),
+            matched,
+          });
+        }
+
+        payrollData.push({
+          driverId,
+          driverName: String(driverName),
+          weekNumber: Number(weekNumber),
+          payPeriod: getWeekDateRange(Number(weekNumber)),
+          salaryType: airtableDriver.SalaryType,
+          zipCode: Object.keys(uploadsByZip).join(', '),
+          totalDeliveries: totalStops,
+          stopsCompleted: totalStops,
+          stopRate:
+            zipBreakdown.length > 0 ? totalStops * zipBreakdown[0].rate : 0,
+          amount: Number(totalAmount.toFixed(2)),
+          zipBreakdown,
+        });
+      }
+    }
+
+    return payrollData;
+  }
+
+  private async getAirtableDrivers(): Promise<any[]> {
+    const airtableResponse = await this.airtable.Drivers();
+    return airtableResponse;
+  }
+
+  private async getAirtablePayrolls(): Promise<any[]> {
+    const airtableResponse = await this.airtable.PayRolls();
+
+    return airtableResponse;
+  }
+  async getAirtableRoutes(): Promise<any[]> {
+    // 1️⃣ If customroutes inserts data, just wait for it
+    const routes = await this.prisma.route.findMany();
+
+    // 3️⃣ Return the actual data
+    return routes;
+  }
 }
 
-/** Helpers */
 function getUtcDayBounds(yyyyMmDd: string) {
-  // Treat the provided date as a UTC calendar day
   const start = new Date(`${yyyyMmDd}T00:00:00.000Z`);
   const end = new Date(`${yyyyMmDd}T00:00:00.000Z`);
-  end.setUTCDate(end.getUTCDate() + 1); // next day start (exclusive)
+  end.setUTCDate(end.getUTCDate() + 1);
   if (isNaN(start.getTime())) {
     throw new BadRequestException('Invalid date');
   }
