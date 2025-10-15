@@ -487,181 +487,207 @@ export class UploadService {
     };
   }
 
-  async getDriverPayroll(): Promise<PayrollRecord[]> {
-    const [airtableDrivers, airtableRoutes] = await Promise.all([
-      this.getAirtableDrivers(),
-      this.getAirtableRoutes(),
-    ]);
+ async getDriverPayroll(): Promise<any[]> {
+  const [airtableDrivers, airtableRoutes] = await Promise.all([
+    this.getAirtableDrivers(),
+    this.getAirtableRoutes(),
+  ]);
 
-    console.log('✅ Sample route:', airtableRoutes[0]);
+  console.log('✅ Sample route:', airtableRoutes[0]);
 
-    const dbDrivers = await this.prisma.user.findMany({
-      select: { driverId: true, fullName: true },
-    });
+  const dbDrivers = await this.prisma.user.findMany({
+    select: { driverId: true, fullName: true },
+  });
 
-    const uploads = await this.prisma.upload.findMany({
-      select: {
-        address: true,
-        driverId: true,
-        lastevent: true,
-        createdAt: true,
-      },
-    });
+  const uploads = await this.prisma.upload.findMany({
+    select: {
+      address: true,
+      driverId: true,
+      lastevent: true,
+      createdAt: true,
+    },
+  });
 
-    const payrollData: PayrollRecord[] = [];
+  const payrollData: PayrollRecord[] = [];
 
-    // --- helpers ---
-    const normalizeZip = (zip?: string): string | null => {
-      if (!zip) return null;
-      const match = zip.match(/\d{4,5}/); // match 4 or 5 digits
-      if (!match) return null;
-      let z = match[0];
-      if (z.length === 4) z = '0' + z; // pad leading zero if missing
-      return z;
-    };
+  // --- helpers ---
+  const normalizeZip = (zip?: string): string | null => {
+    if (!zip) return null;
+    const match = zip.match(/\d{4,5}/);
+    if (!match) return null;
+    let z = match[0];
+    if (z.length === 4) z = '0' + z;
+    return z;
+  };
 
-    const extractRouteZips = (route: any): string[] => {
-      if (!route.zipCode) return [];
-      const raw = Array.isArray(route.zipCode)
-        ? route.zipCode
-        : String(route.zipCode).split(/[, ]+/);
-      return raw
-        .map((z) => normalizeZip(String(z)))
-        .filter(Boolean) as string[];
-    };
+  const extractRouteZips = (route: any): string[] => {
+    if (!route.zipCode) return [];
+    const raw = Array.isArray(route.zipCode)
+      ? route.zipCode
+      : String(route.zipCode).split(/[, ]+/);
+    return raw
+      .map((z) => normalizeZip(String(z)))
+      .filter(Boolean) as string[];
+  };
 
-    // --- main loop ---
-    for (const driver of dbDrivers) {
-      const driverId = driver.driverId;
-      const driverName = driver.fullName;
+  // --- main loop ---
+  for (const driver of dbDrivers) {
+    const driverId = driver.driverId;
+    const driverName = driver.fullName;
 
-      const airtableDriver = airtableDrivers.find(
-        (d) => d['OFID Number'] === driverId,
-      );
-      if (!airtableDriver) continue;
+    const airtableDriver = airtableDrivers.find(
+      (d) => d['OFID Number'] === driverId,
+    );
+    if (!airtableDriver) continue;
 
-      const isCompanyVehicle = (airtableDriver.SalaryType || '')
-        .toLowerCase()
-        .includes('company');
+    const isCompanyVehicle = (airtableDriver.SalaryType || '')
+      .toLowerCase()
+      .includes('company');
 
-      const driverUploads = uploads.filter(
-        (u) =>
-          u.driverId === driverId && u.lastevent?.toLowerCase() === 'delivered',
-      );
-      if (driverUploads.length === 0) continue;
+    const driverUploads = uploads.filter(
+      (u) =>
+        u.driverId === driverId && u.lastevent?.toLowerCase() === 'delivered',
+    );
+    if (driverUploads.length === 0) continue;
 
-      const uploadsByWeek = groupUploadsByWeek(driverUploads);
+    const uploadsByWeek = groupUploadsByWeek(driverUploads);
 
-      for (const [weekNumber, weekUploads] of Object.entries(uploadsByWeek)) {
-        const totalStops = weekUploads.length;
+    for (const [weekNumber, weekUploads] of Object.entries(uploadsByWeek)) {
+      const totalStops = weekUploads.length;
 
-        const uploadsByZip: Record<string, number> = {};
-        for (const upload of weekUploads) {
-          const zip = normalizeZip(zipFilter(upload.address) || undefined);
-          if (!zip) continue;
-          uploadsByZip[zip] = (uploadsByZip[zip] || 0) + 1;
-        }
+      const uploadsByZip: Record<string, number> = {};
+      for (const upload of weekUploads) {
+        const zip = normalizeZip(zipFilter(upload.address) || undefined);
+        if (!zip) continue;
+        uploadsByZip[zip] = (uploadsByZip[zip] || 0) + 1;
+      }
 
-        let totalAmount = 0;
-        const zipBreakdown: {
-          zip: string;
-          stops: number;
-          rate: number;
-          amount: number;
-          matched: boolean;
-        }[] = [];
+      let totalAmount = 0;
+      const zipBreakdown: {
+        zip: string;
+        stops: number;
+        rate: number;
+        amount: number;
+        matched: boolean;
+      }[] = [];
 
-        for (const [zip, stopCount] of Object.entries(uploadsByZip)) {
-          const route = airtableRoutes.find((r) => {
+      for (const [zip, stopCount] of Object.entries(uploadsByZip)) {
+        const route = airtableRoutes.find((r) => {
+          const routeZips = extractRouteZips(r);
+          return routeZips.includes(zip);
+        });
+
+        let rate = 0;
+        let amount = 0;
+        let matched = false;
+
+        if (route) {
+          rate = isCompanyVehicle
+            ? Number(route.ratePerStopCompanyVehicle) || 0
+            : Number(route.ratePerStop) || 0;
+          matched = true;
+        } else {
+          const prefix = zip.slice(0, 3);
+          const nearbyRoute = airtableRoutes.find((r) => {
             const routeZips = extractRouteZips(r);
-            return routeZips.includes(zip);
+            return routeZips.some((z) => z.startsWith(prefix));
           });
 
-          let rate = 0;
-          let amount = 0;
-          let matched = false;
-
-          if (route) {
-            // ✅ Exact match found
+          if (nearbyRoute) {
             rate = isCompanyVehicle
-              ? Number(route.ratePerStopCompanyVehicle) || 0
-              : Number(route.ratePerStop) || 0;
-            matched = true;
+              ? Number(nearbyRoute.ratePerStopCompanyVehicle) || 0
+              : Number(nearbyRoute.ratePerStop) || 0;
+            console.warn(
+              `⚠️ Used nearby ZIP match for ${zip} → ${extractRouteZips(
+                nearbyRoute,
+              ).join(', ')}`,
+            );
           } else {
-            // ⚠️ No direct match — try fallback strategy
-
-            // 1️⃣ Try to find nearby route (same first 3 digits)
-            const prefix = zip.slice(0, 3);
-            const nearbyRoute = airtableRoutes.find((r) => {
-              const routeZips = extractRouteZips(r);
-              return routeZips.some((z) => z.startsWith(prefix));
-            });
-
-            if (nearbyRoute) {
-              rate = isCompanyVehicle
-                ? Number(nearbyRoute.ratePerStopCompanyVehicle) || 0
-                : Number(nearbyRoute.ratePerStop) || 0;
-              console.warn(
-                `⚠️ Used nearby ZIP match for ${zip} → ${extractRouteZips(nearbyRoute).join(', ')}`,
-              );
-            } else {
-              // 2️⃣ No nearby match — use global average
-              const avgRate =
-                airtableRoutes.reduce(
-                  (acc, r) =>
-                    acc +
-                    (isCompanyVehicle
-                      ? Number(r.ratePerStopCompanyVehicle) || 0
-                      : Number(r.ratePerStop) || 0),
-                  0,
-                ) / (airtableRoutes.length || 1);
-              rate = Number(avgRate.toFixed(2));
-              console.warn(`⚠️ Used average rate for ZIP ${zip}: ${rate}`);
-            }
+            const avgRate =
+              airtableRoutes.reduce(
+                (acc, r) =>
+                  acc +
+                  (isCompanyVehicle
+                    ? Number(r.ratePerStopCompanyVehicle) || 0
+                    : Number(r.ratePerStop) || 0),
+                0,
+              ) / (airtableRoutes.length || 1);
+            rate = Number(avgRate.toFixed(2));
+            console.warn(`⚠️ Used average rate for ZIP ${zip}: ${rate}`);
           }
-
-          amount = stopCount * rate;
-          totalAmount += amount;
-
-          zipBreakdown.push({
-            zip,
-            stops: stopCount,
-            rate: Number(rate.toFixed(2)),
-            amount: Number(amount.toFixed(2)),
-            matched,
-          });
         }
 
-        payrollData.push({
-          driverId,
-          driverName: String(driverName),
-          weekNumber: Number(weekNumber),
-          payPeriod: getWeekDateRange(Number(weekNumber)),
-          salaryType: airtableDriver.SalaryType,
-          zipCode: Object.keys(uploadsByZip).join(', '),
-          totalDeliveries: totalStops,
-          stopsCompleted: totalStops,
-          // stopRate:
-          //   zipBreakdown.length > 0 ? totalStops * zipBreakdown[0].rate : 0,
-          amount: Number(totalAmount.toFixed(2)),
-          zipBreakdown,
+        amount = stopCount * rate;
+        totalAmount += amount;
+
+        zipBreakdown.push({
+          zip,
+          stops: stopCount,
+          rate: Number(rate.toFixed(2)),
+          amount: Number(amount.toFixed(2)),
+          matched,
         });
       }
-    }
 
-    return payrollData;
+      payrollData.push({
+        driverId,
+        driverName: String(driverName),
+        weekNumber: Number(weekNumber),
+        payPeriod: getWeekDateRange(Number(weekNumber)),
+        salaryType: airtableDriver.SalaryType,
+        zipCode: Object.keys(uploadsByZip).join(', '),
+        totalDeliveries: totalStops,
+        stopsCompleted: totalStops,
+        amount: Number(totalAmount.toFixed(2)),
+        zipBreakdown,
+      });
+    }
   }
+
+  // --- 📅 Group by Week with ZIP-level detail ---
+  const groupedPayroll = Object.entries(
+    payrollData.reduce((acc, record) => {
+      const week = record.weekNumber;
+      if (typeof week !== 'number') {
+      // Optionally, handle or skip records with undefined weekNumber
+      return acc;
+    }
+      if (!acc[week]) acc[week] = [];
+      acc[week].push(record);
+      return acc;
+    }, {} as Record<number, PayrollRecord[]>),
+  ).map(([weekNumber, records]) => ({
+    weekNumber: Number(weekNumber),
+    payPeriod: records[0]?.payPeriod || '',
+    totalStops: records.reduce((sum, r) => sum + (r.totalDeliveries || 0), 0),
+    subtotal: Number(
+      records.reduce((sum, r) => sum + (r.amount || 0), 0).toFixed(2),
+    ),
+    drivers: records.map((r) => ({
+      driverName: r.driverName,
+      salaryType: r.salaryType,
+      totalStops: r.totalDeliveries,
+      subtotal: r.amount,
+      // 👇 Include ZIP-level breakdown here
+      zipBreakdown: (r.zipBreakdown ?? []).map((z) => ({
+        zip: z.zip,
+        stops: z.stops,
+        rate: z.rate,
+        amount: z.amount,
+      })),
+    })),
+  }));
+
+  return groupedPayroll;
+}
+
+
 
   private async getAirtableDrivers(): Promise<any[]> {
     const airtableResponse = await this.airtable.Drivers();
     return airtableResponse;
   }
 
-  private async getAirtablePayrolls(): Promise<any[]> {
-    const airtableResponse = await this.airtable.PayRolls();
-
-    return airtableResponse;
-  }
   async getAirtableRoutes(): Promise<any[]> {
     // 1️⃣ If customroutes inserts data, just wait for it
     const routes = await this.prisma.route.findMany();
