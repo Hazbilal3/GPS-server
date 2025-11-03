@@ -70,18 +70,21 @@ model Payroll {
   driverId        Int
   driverName      String
   zipCode         String?
+  zipBreakdown    Json?
   address         String?
-  weekNumber      Int?
+  weekNumber      Int // <-- CHANGED: Was Int?
   payPeriod       String?
   salaryType      String?
   stopsCompleted  Int
   totalDeliveries Int?
-  stopRate        Float
-  rate            Float?
   amount          Float
+  totalDeduction  Float    @default(0)
+  netPay          Float // <-- CHANGED: Was Float?
   createdAt       DateTime @default(now())
 
   driver User @relation(fields: [driverId], references: [driverId])
+
+  @@unique([driverId, weekNumber]) // <-- THIS IS THE KEY
 }
 
 model Route {
@@ -91,8 +94,8 @@ model Route {
   ratePerStop               Float    @map("rate_per_stop") // e.g. 2.35
   zone                      String?  @map("zone") // e.g. 'Zone B'
   status                    String?  @map("status") // e.g. 'Active'
-  baseRate                  Float?  @map("base_rate") // e.g. 'Active'
-  baseRateCompanyVehicle    Float?  @map("base_rate_company_vehicle") // e.g. 'Active'
+  baseRate                  Float?   @map("base_rate") // e.g. 'Active'
+  baseRateCompanyVehicle    Float?   @map("base_rate_company_vehicle") // e.g. 'Active'
   schedule                  String[] @map("schedule") // array of weekdays
   zipCode                   String[] @map("zip_code") // array of ZIPs ['6379']
   dayOfTheWeek              String?  @map("day_of_the_week") // e.g. 'Tuesday'
@@ -102,3 +105,42 @@ model Route {
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 }
+
+model AirtablePayroll {
+  id                  Int       @id @default(autoincrement())
+  driverId            Int?
+  payrollGeneratedOn  DateTime?
+  payPeriod           String?
+  directDepositDate   DateTime?
+  weekNumber          Int?
+  driver              String?
+  stops               String?
+  totalFromStops      Float?
+  totalBonus          Float?
+  totalDeductions     Float?
+  netPay              Float?
+  driverName          String?
+  payrollSummary      String?
+  totalStopsCompleted Int?
+  salaryType          String?
+  subtotal            Float?
+  created             DateTime?
+}
+
+model Driver {
+  id                   Int      @id @default(autoincrement())
+  fullName             String
+  firstName            String
+  lastName             String
+  Status               String
+  phoneNumber          String
+  email                String   @unique
+  OFIDNumber           Int?
+  salaryType           String
+  schedule             String[]
+  dayoftheweek         String?
+  driverAvailableToday Boolean? // Optional field for "Driver Available Today?"
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+

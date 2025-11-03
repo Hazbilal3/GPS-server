@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "public"."Payroll" ADD COLUMN     "netPay" DOUBLE PRECISION,
+ADD COLUMN     "totalBonus" DOUBLE PRECISION DEFAULT 0,
+ADD COLUMN     "totalDeductions" DOUBLE PRECISION DEFAULT 0;

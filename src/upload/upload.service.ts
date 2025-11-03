@@ -5,16 +5,18 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import * as XLSX from 'xlsx';
 import axios from 'axios';
 import haversineDistance from 'haversine-distance';
 import { PrismaService } from 'src/prisma.service';
 import { UploadRowDto } from './dto/upload.dto';
-import { AirtableController } from 'src/airtable/airtable.controller';
-import { AirtableService } from 'src/airtable/airtable.service';
-import { Prisma } from '@prisma/client';
+// Import Prisma types for transactions
+import { Prisma, User } from '@prisma/client';
 
+// ... (All helper functions from parseLatLngSpaceSeparated to getWeekDateRange are unchanged) ...
 function parseLatLngSpaceSeparated(input: string) {
   const parts = input.trim().split(/\s+/);
   if (parts.length < 2) {
@@ -99,7 +101,6 @@ function normalizeAddress(raw: string) {
 
   let a = String(raw);
 
-  // Remove tokens like "LOCATION-3-6621" or "LOCATION 3 6621"
   a = a.replace(/\bLOCATION[-\s]*[\w-]+\b/gi, ' ');
 
   a = a
@@ -324,28 +325,61 @@ function getWeekDateRange(weekNumber: number): string {
   return `${start.toISOString().slice(0, 10)} - ${end.toISOString().slice(0, 10)}`;
 }
 
+// --- THIS IS THE MODIFIED INTERFACE ---
+// It now perfectly matches the `Payroll` model from `schema.prisma`
 export interface PayrollRecord {
-  driverId: number | null;
+  driverId: number;
   driverName: string;
-  zipCode: string;
-  address?: string;
-  weekNumber?: number;
-  payPeriod?: string;
-  salaryType?: string;
+  zipCode: string | null; // <-- FIX: Allows null
+  address?: string | null; // <-- FIX: Allows null
+  weekNumber: number; // <-- FIX: Is non-nullable
+  payPeriod: string | null; // <-- FIX: Allows null
+  paycheck?: string;
+  salaryType: string | null; // <-- FIX: Allows null
   stopsCompleted: number;
-  totalDeliveries: number;
-  // stopRate: number;
+  totalDeliveries: number | null; // <-- FIX: Allows null
   rate?: number;
   amount: number;
-  zipBreakdown?: { zip: string; stops: number; rate: number; amount: number }[];
+  totalDeduction: number;
+  netPay: number; // <-- FIX: Is non-nullable
+  zipBreakdown?: Prisma.JsonValue;
   createdAt?: Date;
+}
+// ----------------------------------------
+
+function getPaycheckDate(weekNumber) {
+  // Calculate paycheck date based on week number (example: Friday of that week)
+  const year = new Date().getFullYear();
+  const firstDayOfYear = new Date(year, 0, 1);
+  const daysOffset = (weekNumber - 1) * 7;
+  const weekStart = new Date(
+    firstDayOfYear.getTime() + daysOffset * 24 * 60 * 60 * 1000,
+  );
+
+  // Set to Friday (5th day of the week)
+  const paycheckDate = new Date(weekStart);
+  paycheckDate.setDate(weekStart.getDate() + (5 - weekStart.getDay()));
+
+  return paycheckDate.toISOString().split('T')[0]; // e.g. "2025-07-04"
+}
+
+function getUtcDayBounds(yyyyMmDd: string) {
+  const start = new Date(`${yyyyMmDd}T00:00:00.000Z`);
+  const end = new Date(`${yyyyMmDd}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  if (isNaN(start.getTime())) {
+    throw new BadRequestException('Invalid date');
+  }
+  return { start, end };
 }
 
 @Injectable()
 export class UploadService {
+  // Add a logger for better debugging
+  private readonly logger = new Logger(UploadService.name);
+
   constructor(
-    private prisma: PrismaService,
-    private airtable: AirtableService,
+    private prisma: PrismaService, // Note: AirtableService is no longer needed here
   ) {}
 
   async processExcel(
@@ -365,23 +399,33 @@ export class UploadService {
     const sheet = XLSX.utils.sheet_to_json(worksheet);
 
     const uploads: UploadRowDto[] = [];
+    const skipped: any[] = [];
 
     const createdAtOverride = date ? utcStartOfDay(date) : undefined;
 
-    return this.prisma.$transaction(
+    const transactionResult = await this.prisma.$transaction(
       async (prisma) => {
         for (const row of sheet as any[]) {
           let barcodeVal = row['Barcode'];
           if (typeof barcodeVal === 'number') {
             barcodeVal = barcodeVal.toFixed(0);
           }
-          const barcode = String(barcodeVal);
+          const barcode = String(barcodeVal).trim();
 
-          const addressRaw = String(row['Address']);
-          const gpsLocation = String(row['Last GPS location']);
-          const sequenceNo = String(row['Seq No']);
-          const lastEvent = String(row['Last Event']);
-          const lastEventTime = String(row['Last Event time']);
+          const existing = await prisma.upload.findFirst({
+            where: { driverId: fkValue, barcode },
+          });
+
+          if (existing) {
+            skipped.push(barcode);
+            continue;
+          }
+
+          const addressRaw = String(row['Address'] ?? '');
+          const gpsLocation = String(row['Last GPS location'] ?? '');
+          const sequenceNo = String(row['Seq No'] ?? '');
+          const lastEvent = String(row['Last Event'] ?? '');
+          const lastEventTime = String(row['Last Event time'] ?? '');
           let expectedLat: number | null = null;
           let expectedLng: number | null = null;
           let distanceKm: number | null = null;
@@ -389,7 +433,7 @@ export class UploadService {
           let googleMapsLink: string | null = null;
 
           let gpsForBias: { lat: number; lng: number } | null = null;
-          if (gpsLocation && String(gpsLocation).trim()) {
+          if (gpsLocation && gpsLocation.trim()) {
             try {
               gpsForBias = parseLatLngSpaceSeparated(gpsLocation);
             } catch {
@@ -397,7 +441,7 @@ export class UploadService {
             }
           }
 
-          if (addressRaw && String(addressRaw).trim().length > 0) {
+          if (addressRaw && addressRaw.trim().length > 0) {
             try {
               const geo = await geocodeSmart(addressRaw, {
                 gpsBias: gpsForBias || undefined,
@@ -421,41 +465,31 @@ export class UploadService {
           if (gpsForBias && expectedLat != null && expectedLng != null) {
             try {
               const start = { lat: gpsForBias.lat, lon: gpsForBias.lng };
-              const end = {
-                lat: Number(expectedLat),
-                lon: Number(expectedLng),
-              };
+              const end = { lat: Number(expectedLat), lon: Number(expectedLng) };
 
               distanceKm = haversineDistance(start, end);
-
               status = distanceKm > 15 ? 'mismatch' : 'match';
 
-              googleMapsLink =
-                `https://www.google.com/maps/dir/?api=1&origin=${start.lat},${start.lon}` +
-                `&destination=${end.lat},${end.lon}`;
+              googleMapsLink = `https://www.google.com/maps/dir/?api=1&origin=${start.lat},${start.lon}&destination=${end.lat},${end.lon}`;
             } catch {
               if (!status) status = 'gps_parse_error';
             }
-          } else if (
-            !gpsLocation &&
-            expectedLat != null &&
-            expectedLng != null
-          ) {
+          } else if (!gpsLocation && expectedLat != null && expectedLng != null) {
             status = status ?? 'geocoded';
           }
 
           const saved = await prisma.upload.create({
             data: {
               driverId: fkValue,
-              barcode: barcode,
-              sequenceNo: sequenceNo,
+              barcode,
+              sequenceNo,
               lastevent: lastEvent,
               lasteventdata: lastEventTime,
               address: addressRaw,
               gpsLocation,
               expectedLat,
               expectedLng,
-              distanceKm: distanceKm,
+              distanceKm,
               status,
               googleMapsLink,
               ...(createdAtOverride ? { createdAt: createdAtOverride } : {}),
@@ -464,97 +498,229 @@ export class UploadService {
 
           uploads.push(saved as any);
         }
-        return uploads;
+
+        // --- NEW: Calculate and save payroll within the transaction ---
+        if (uploads.length > 0) {
+          this.logger.log(
+            `Uploads saved for driver ${driverId}. Recalculating payroll...`,
+          );
+          await this.calculateAndSavePayrollForDriver(driverId, user, prisma);
+        } else {
+          this.logger.log(
+            `No new uploads for driver ${driverId}. Skipping payroll calculation.`,
+          );
+        }
+
+        return {
+          message:
+            skipped.length > 0
+              ? `Some data already exists — skipped ${skipped.length} entries`
+              : 'Upload successful',
+          uploadedCount: uploads.length,
+          skippedCount: skipped.length,
+          skippedBarcodes: skipped,
+        };
       },
       { maxWait: 500000, timeout: 500000 },
     );
+
+    return transactionResult;
   }
 
-  async deleteByDriverAndDate(driverId: number, dateStr: string) {
-    const { start, end } = getUtcDayBounds(dateStr);
+async deleteByDriverAndDate(driverId: number, dateStr: string) {
+  const { start, end } = getUtcDayBounds(dateStr);
 
-    const result = await this.prisma.upload.deleteMany({
+  // Delete uploads for that day
+  const result = await this.prisma.upload.deleteMany({
+    where: {
+      driverId,
+      createdAt: { gte: start, lt: end },
+    },
+  });
+
+  const user = await this.prisma.user.findUnique({ where: { driverId } });
+  if (!user) {
+    this.logger.warn(`No user found for driverId ${driverId}`);
+    return { driverId, date: dateStr, deleted: result.count };
+  }
+
+  // Determine ISO week number of the deleted date
+  const deletedDate = new Date(`${dateStr}T00:00:00.000Z`);
+  const weekNumber = getISOWeek(deletedDate);
+
+  // Check if this driver has *any* remaining uploads in that week
+  const weekStart = new Date(deletedDate);
+  weekStart.setUTCDate(deletedDate.getUTCDate() - (deletedDate.getUTCDay() || 7) + 1); // Monday
+  const weekEnd = new Date(weekStart);
+  weekEnd.setUTCDate(weekStart.getUTCDate() + 7); // Sunday
+
+  const remainingUploads = await this.prisma.upload.count({
+    where: {
+      driverId,
+      createdAt: { gte: weekStart, lt: weekEnd },
+    },
+  });
+
+  if (remainingUploads === 0) {
+    // Delete payroll for that week
+    const deletedPayroll = await this.prisma.payroll.deleteMany({
       where: {
         driverId,
-        createdAt: { gte: start, lt: end },
+        weekNumber,
       },
     });
+
+    this.logger.warn(
+      `🧾 Deleted payroll record for driver ${driverId} | week ${weekNumber} because all uploads were removed.`,
+    );
 
     return {
       driverId,
       date: dateStr,
-      deleted: result.count,
+      deletedUploads: result.count,
+      deletedPayroll: deletedPayroll.count,
+      message: "Uploads and payroll deleted for this week.",
+    };
+  } else {
+    // Recalculate payroll if some uploads still exist in that week
+    this.logger.log(
+      `Uploads deleted for driver ${driverId}, recalculating payroll for week ${weekNumber}...`,
+    );
+    await this.calculateAndSavePayrollForDriver(driverId, user, this.prisma);
+
+    return {
+      driverId,
+      date: dateStr,
+      deletedUploads: result.count,
+      message: "Uploads deleted; payroll recalculated for remaining records.",
     };
   }
+}
 
- async getDriverPayroll(): Promise<any[]> {
-  const [airtableDrivers, airtableRoutes] = await Promise.all([
-    this.getAirtableDrivers(),
-    this.getAirtableRoutes(),
-  ]);
+  /**
+   * NEW: This function recalculates and saves payroll for ALL drivers.
+   * Triggered by the new controller endpoint.
+   */
+  async recalculateAllPayroll() {
+    this.logger.log('Starting global payroll recalculation for all drivers...');
+    const drivers = await this.prisma.user.findMany({
+      where: { driverId: { not: null } },
+    });
+    let successCount = 0;
+    let errorCount = 0;
 
-  console.log('✅ Sample route:', airtableRoutes[0]);
+    for (const driver of drivers) {
+      try {
+        await this.calculateAndSavePayrollForDriver(
+          driver.driverId!,
+          driver,
+          this.prisma,
+        );
+        successCount++;
+        this.logger.log(
+          `Successfully recalculated payroll for driver: ${driver.fullName}`,
+        );
+      } catch (error) {
+        errorCount++;
+        this.logger.error(
+          `Failed to recalculate payroll for driver: ${driver.fullName}`,
+          error.stack,
+        );
+      }
+    }
 
-  const dbDrivers = await this.prisma.user.findMany({
-    select: { driverId: true, fullName: true },
-  });
+    const message = `Global payroll recalculation complete. Success: ${successCount}, Failed: ${errorCount}`;
+    this.logger.log(message);
+    return { message, successCount, errorCount };
+  }
 
-  const uploads = await this.prisma.upload.findMany({
-    select: {
-      address: true,
-      driverId: true,
-      lastevent: true,
-      createdAt: true,
-    },
-  });
-
-  const payrollData: PayrollRecord[] = [];
-
-  // --- helpers ---
-  const normalizeZip = (zip?: string): string | null => {
-    if (!zip) return null;
-    const match = zip.match(/\d{4,5}/);
-    if (!match) return null;
-    let z = match[0];
-    if (z.length === 4) z = '0' + z;
-    return z;
-  };
-
-  const extractRouteZips = (route: any): string[] => {
-    if (!route.zipCode) return [];
-    const raw = Array.isArray(route.zipCode)
-      ? route.zipCode
-      : String(route.zipCode).split(/[, ]+/);
-    return raw
-      .map((z) => normalizeZip(String(z)))
-      .filter(Boolean) as string[];
-  };
-
-  // --- main loop ---
-  for (const driver of dbDrivers) {
-    const driverId = driver.driverId;
+  /**
+   * NEW: This is the core logic, refactored into a private method.
+   * It calculates payroll for a single driver and saves it to the DB.
+   * Can be used within a transaction.
+   */
+  private async calculateAndSavePayrollForDriver(
+    driverId: number,
+    driver: User,
+    prisma: Prisma.TransactionClient | PrismaService,
+  ) {
     const driverName = driver.fullName;
 
-    const airtableDriver = airtableDrivers.find(
-      (d) => d['OFID Number'] === driverId,
-    );
-    if (!airtableDriver) continue;
+    // 1. Fetch routes and driver's Airtable info
+    const airtableRoutes = await this.getAirtableRoutes();
 
-    const isCompanyVehicle = (airtableDriver.SalaryType || '')
-      .toLowerCase()
-      .includes('company');
+    const airtableDriver = await this.prisma.driver.findFirst({
+      where: { OFIDNumber: driverId },
+    });
 
-    const driverUploads = uploads.filter(
-      (u) =>
-        u.driverId === driverId && u.lastevent?.toLowerCase() === 'delivered',
-    );
-    if (driverUploads.length === 0) continue;
+    if (!airtableDriver) {
+      this.logger.warn(
+        `❌ No Airtable Driver record found for driverId ${driverId} (${driverName}). Skipping payroll.`,
+      );
+      return;
+    }
 
+    const salaryType = (airtableDriver.salaryType || '').toLowerCase();
+    this.logger.log(`💰 ${driverName} | SalaryType: ${salaryType}`);
+
+    // 2. Fetch uploads for this driver
+    const driverUploads = await prisma.upload.findMany({
+      where: {
+        driverId,
+        lastevent: { equals: 'delivered', mode: 'insensitive' },
+      },
+      select: { address: true, createdAt: true },
+    });
+
+    if (driverUploads.length === 0) {
+      this.logger.warn(`No 'delivered' uploads found for ${driverName}.`);
+      // --- FIX: We should still save a $0 payroll record if they have no uploads ---
+      // This allows deductions to be applied to a $0 payroll.
+      // Let's check if they have *any* payroll weeks.
+      const existingPayrollWeeks = await prisma.payroll.findMany({
+        where: { driverId },
+        select: { weekNumber: true },
+      });
+      if (existingPayrollWeeks.length === 0) {
+         this.logger.warn(`No uploads and no past payroll for ${driverName}. Skipping.`);
+         return;
+      }
+      // If they have past payroll, we can assume we should continue
+      // and process $0 weeks.
+    }
+
+    // 3. Group uploads by week
     const uploadsByWeek = groupUploadsByWeek(driverUploads);
 
-    for (const [weekNumber, weekUploads] of Object.entries(uploadsByWeek)) {
+    // --- Special driver constants ---
+    const FIXED_RATE_DRIVER_ID = 254309;
+    const FIXED_RATE_DRIVER_NAME = 'Carlos Jose Velez';
+    const FIXED_DAILY_RATE = 245;
+
+    // --- Helpers ---
+    const normalizeZip = (zip?: string): string | null => {
+      if (!zip) return null;
+      const match = zip.match(/\d{4,5}/);
+      if (!match) return null;
+      let z = match[0];
+      if (z.length === 4) z = '0' + z;
+      return z;
+    };
+
+    const extractRouteZips = (route: any): string[] => {
+      if (!route.zipCode) return [];
+      const raw = Array.isArray(route.zipCode)
+        ? route.zipCode
+        : String(route.zipCode).split(/[, ]+/);
+      return raw.map((z) => normalizeZip(String(z))).filter(Boolean) as string[];
+    };
+
+    // 4. Loop through each week and calculate
+    for (const [weekNumberStr, weekUploads] of Object.entries(uploadsByWeek)) {
+      const weekNumber = Number(weekNumberStr);
       const totalStops = weekUploads.length;
 
+      // --- Count stops by ZIP ---
       const uploadsByZip: Record<string, number> = {};
       for (const upload of weekUploads) {
         const zip = normalizeZip(zipFilter(upload.address) || undefined);
@@ -568,141 +734,286 @@ export class UploadService {
         stops: number;
         rate: number;
         amount: number;
-        matched: boolean;
       }[] = [];
 
-      for (const [zip, stopCount] of Object.entries(uploadsByZip)) {
-        const route = airtableRoutes.find((r) => {
-          const routeZips = extractRouteZips(r);
-          return routeZips.includes(zip);
-        });
-
-        let rate = 0;
-        let amount = 0;
-        let matched = false;
-
-        if (route) {
-          rate = isCompanyVehicle
-            ? Number(route.ratePerStopCompanyVehicle) || 0
-            : Number(route.ratePerStop) || 0;
-          matched = true;
-        } else {
-          const prefix = zip.slice(0, 3);
-          const nearbyRoute = airtableRoutes.find((r) => {
-            const routeZips = extractRouteZips(r);
-            return routeZips.some((z) => z.startsWith(prefix));
-          });
-
-          if (nearbyRoute) {
-            rate = isCompanyVehicle
-              ? Number(nearbyRoute.ratePerStopCompanyVehicle) || 0
-              : Number(nearbyRoute.ratePerStop) || 0;
-            console.warn(
-              `⚠️ Used nearby ZIP match for ${zip} → ${extractRouteZips(
-                nearbyRoute,
-              ).join(', ')}`,
-            );
-          } else {
-            const avgRate =
-              airtableRoutes.reduce(
-                (acc, r) =>
-                  acc +
-                  (isCompanyVehicle
-                    ? Number(r.ratePerStopCompanyVehicle) || 0
-                    : Number(r.ratePerStop) || 0),
-                0,
-              ) / (airtableRoutes.length || 1);
-            rate = Number(avgRate.toFixed(2));
-            console.warn(`⚠️ Used average rate for ZIP ${zip}: ${rate}`);
-          }
+      if (
+        driverId === FIXED_RATE_DRIVER_ID ||
+        driverName === FIXED_RATE_DRIVER_NAME
+      ) {
+        // --- Special Fixed Rate Logic ---
+        const uniqueDays = new Set<string>();
+        for (const upload of weekUploads) {
+          uniqueDays.add(upload.createdAt.toISOString().split('T')[0]);
         }
-
-        amount = stopCount * rate;
-        totalAmount += amount;
+        const daysWorked = uniqueDays.size;
+        totalAmount = daysWorked * FIXED_DAILY_RATE;
 
         zipBreakdown.push({
-          zip,
-          stops: stopCount,
-          rate: Number(rate.toFixed(2)),
-          amount: Number(amount.toFixed(2)),
-          matched,
+          zip: 'N/A', // Changed from 'N/A'
+          stops: totalStops, // Using total stops for consistency
+          rate: FIXED_DAILY_RATE,
+          amount: totalAmount,
         });
+
+        this.logger.log(
+          `💵 FIXED RATE: ${driverName} | Days: ${daysWorked} | Rate: ${FIXED_DAILY_RATE} | Total: ${totalAmount.toFixed(2)}`,
+        );
+      } else {
+        // --- Standard Rate Logic ---
+        for (const [zip, stopCount] of Object.entries(uploadsByZip)) {
+          const route = airtableRoutes.find((r) => {
+            const routeZips = extractRouteZips(r);
+            return routeZips.includes(zip);
+          });
+
+          let rate = 0;
+          if (route) {
+            if (salaryType.includes('company vehicle')) {
+              rate = Number(route.ratePerStopCompanyVehicle) || 0;
+            } else if (salaryType.includes('fixed')) {
+              rate = Number(route.baseRate) || 0;
+            } else if (salaryType.includes('regular')) {
+              rate = Number(route.ratePerStop) || 0;
+            } else {
+              this.logger.warn(
+                `⚠️ Unknown salary type '${salaryType}' for driver ${driverName}, defaulting to ratePerStop`,
+              );
+              rate = Number(route.ratePerStop) || 0;
+            }
+          } else {
+            this.logger.warn(`⚠️ No exact ZIP match for ${zip}. Rate set to 0.`);
+          }
+
+          const amount = stopCount * rate;
+          totalAmount += amount;
+
+          // --- Save ZIP-level breakdown ---
+          zipBreakdown.push({
+            zip,
+            stops: stopCount,
+            rate: Number(rate.toFixed(2)),
+            amount: Number(amount.toFixed(2)),
+          });
+        }
       }
 
-      payrollData.push({
-        driverId,
-        driverName: String(driverName),
-        weekNumber: Number(weekNumber),
-        payPeriod: getWeekDateRange(Number(weekNumber)),
-        salaryType: airtableDriver.SalaryType,
-        zipCode: Object.keys(uploadsByZip).join(', '),
-        totalDeliveries: totalStops,
-        stopsCompleted: totalStops,
-        amount: Number(totalAmount.toFixed(2)),
-        zipBreakdown,
-      });
+      const finalAmount = Number(totalAmount.toFixed(2));
+
+      // 5. --- Save to DB using upsert ---
+      try {
+        const existingPayroll = await prisma.payroll.findUnique({
+          where: {
+            driverId_weekNumber: { driverId, weekNumber },
+          },
+          select: { totalDeduction: true },
+        });
+
+        const totalDeduction = existingPayroll?.totalDeduction || 0;
+        const netPay = finalAmount - totalDeduction;
+
+        const payrollData = {
+          driverId,
+          driverName: String(driverName),
+          weekNumber,
+          payPeriod: getWeekDateRange(weekNumber),
+          salaryType: airtableDriver.salaryType,
+          zipCode: Object.keys(uploadsByZip).join(', ') || null,
+          totalDeliveries: totalStops,
+          stopsCompleted: totalStops,
+          amount: finalAmount,
+          totalDeduction,
+          netPay,
+          zipBreakdown: zipBreakdown.length > 0 ? zipBreakdown : Prisma.JsonNull, // Save breakdown
+        };
+
+        await prisma.payroll.upsert({
+          where: { driverId_weekNumber: { driverId, weekNumber } },
+          update: payrollData,
+          create: payrollData,
+        });
+
+        this.logger.log(
+          `✅ Upserted payroll for ${driverName} | Week ${weekNumber} | Amount: ${finalAmount}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `❌ Failed to upsert payroll for ${driverName} | Week ${weekNumber}`,
+          error.stack,
+        );
+      }
     }
   }
 
-  // --- 📅 Group by Week with ZIP-level detail ---
-  const groupedPayroll = Object.entries(
-    payrollData.reduce((acc, record) => {
-      const week = record.weekNumber;
-      if (typeof week !== 'number') {
-      // Optionally, handle or skip records with undefined weekNumber
-      return acc;
-    }
-      if (!acc[week]) acc[week] = [];
-      acc[week].push(record);
-      return acc;
-    }, {} as Record<number, PayrollRecord[]>),
-  ).map(([weekNumber, records]) => ({
-    weekNumber: Number(weekNumber),
-    payPeriod: records[0]?.payPeriod || '',
-    totalStops: records.reduce((sum, r) => sum + (r.totalDeliveries || 0), 0),
-    subtotal: Number(
-      records.reduce((sum, r) => sum + (r.amount || 0), 0).toFixed(2),
-    ),
-    drivers: records.map((r) => ({
-      driverName: r.driverName,
-      salaryType: r.salaryType,
-      totalStops: r.totalDeliveries,
-      subtotal: r.amount,
-      // 👇 Include ZIP-level breakdown here
-      zipBreakdown: (r.zipBreakdown ?? []).map((z) => ({
-        zip: z.zip,
-        stops: z.stops,
-        rate: z.rate,
-        amount: z.amount,
+  /**
+   * REWRITTEN: Get all payroll, now reads from the DB
+   */
+  async getDriverPayroll(): Promise<any[]> {
+    // --- FIX: Added explicit select to ensure zipBreakdown is fetched ---
+    const payrollData = await this.prisma.payroll.findMany({
+      select: {
+        id: true,
+        driverId: true,
+        driverName: true,
+        weekNumber: true,
+        payPeriod: true,
+        salaryType: true,
+        totalDeliveries: true,
+        amount: true,
+        totalDeduction: true,
+        netPay: true,
+        zipBreakdown: true, // <-- Explicitly select zipBreakdown
+      },
+      orderBy: {
+        weekNumber: 'desc',
+      },
+    });
+
+    // --- Group payroll by week (to match existing output format) ---
+    const groupedPayroll = Object.entries(
+      payrollData.reduce((acc, record) => {
+        const week = record.weekNumber;
+        if (typeof week !== 'number') return acc;
+        if (!acc[week]) acc[week] = [];
+        // The record now perfectly matches PayrollRecord, so this push is safe
+        acc[week].push(record as unknown as PayrollRecord); // Cast to PayrollRecord
+        return acc;
+      }, {} as Record<number, PayrollRecord[]>),
+    ).map(([weekNumber, records]) => ({
+      weekNumber: Number(weekNumber),
+      payPeriod: records[0]?.payPeriod || '',
+      totalStops: records.reduce((sum, r) => sum + (r.totalDeliveries || 0), 0),
+      subtotal: Number(
+        records.reduce((sum, r) => sum + (r.amount || 0), 0).toFixed(2),
+      ),
+      totalDeductions: Number(
+        records.reduce((sum, r) => sum + (r.totalDeduction || 0), 0).toFixed(2),
+      ),
+      netPay: Number(
+        records.reduce((sum, r) => sum + (r.netPay || 0), 0).toFixed(2),
+      ),
+      drivers: records.map((r) => ({
+        driverId: r.driverId, // Pass driverId to frontend
+        driverName: r.driverName,
+        salaryType: r.salaryType,
+        totalStops: r.totalDeliveries,
+        subtotal: r.amount,
+        totalDeduction: r.totalDeduction,
+        netPay: r.netPay,
+        zipBreakdown: r.zipBreakdown ?? [], // <-- This line should now work
       })),
-    })),
-  }));
+    }));
 
-  return groupedPayroll;
-}
-
-
-
-  private async getAirtableDrivers(): Promise<any[]> {
-    const airtableResponse = await this.airtable.Drivers();
-    return airtableResponse;
+    return groupedPayroll;
   }
 
-  async getAirtableRoutes(): Promise<any[]> {
-    // 1️⃣ If customroutes inserts data, just wait for it
-    const routes = await this.prisma.route.findMany();
+  /**
+   * REWRITTEN: Get payroll by driver, now reads from the DB
+   */
+  async getPayrollByDriver(driverId: number): Promise<any[]> {
+    const driverPayroll = await this.prisma.payroll.findMany({
+      where: { driverId },
+      orderBy: {
+        weekNumber: 'desc',
+      },
+      // --- FIX: Add select to ensure all fields are returned ---
+      select: {
+        weekNumber: true,
+        payPeriod: true,
+        salaryType: true,
+        stopsCompleted: true,
+        amount: true,
+        totalDeduction: true,
+        netPay: true,
+        zipBreakdown: true, // <-- Explicitly select zipBreakdown
+      },
+    });
 
-    // 3️⃣ Return the actual data
+    if (!driverPayroll) {
+      return [];
+    }
+
+    // Format to match old output (simplified)
+    return driverPayroll.map((record) => ({
+      weekNumber: record.weekNumber,
+      payPeriod: record.payPeriod,
+      salaryType: record.salaryType,
+      totalStops: record.stopsCompleted,
+      subtotal: record.amount,
+      totalDeduction: record.totalDeduction,
+      netPay: record.netPay,
+      zipBreakdown: record.zipBreakdown ?? [], // <-- FIX: Return the zipBreakdown
+    }));
+  }
+
+  /**
+   * FIXED: This will now find the record and update it.
+   */
+  async updatePayrollDeduction({
+    driverId,
+    weekNumber,
+    totalDeduction,
+  }: {
+    driverId: number;
+    weekNumber: number;
+    totalDeduction: number;
+  }) {
+    // This query now uses the compound unique index
+    const existing = await this.prisma.payroll.findUnique({
+      where: {
+        driverId_weekNumber: { driverId, weekNumber },
+      },
+    });
+
+    if (!existing) {
+      this.logger.error(
+        `Payroll not found for driverId ${driverId}, week ${weekNumber}`,
+      );
+      // Throw a user-friendly error
+      throw new NotFoundException(
+        `Payroll record not found for driver ${driverId}, week ${weekNumber}. It may need to be calculated first.`,
+      );
+    }
+
+    const netPay = existing.amount - totalDeduction;
+
+    try {
+      return await this.prisma.payroll.update({
+        where: {
+          id: existing.id, // Update by the primary key
+        },
+        data: {
+          totalDeduction,
+          netPay,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to update deduction for driver ${driverId}, week ${weekNumber}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException('Failed to update payroll.');
+    }
+  }
+
+  /**
+   * REPLACED: This now fetches from our local DB, not Airtable.
+   */
+  async getAirtableRoutes(): Promise<any[]> {
+    const routes = await this.prisma.route.findMany();
     return routes;
   }
-}
 
-function getUtcDayBounds(yyyyMmDd: string) {
-  const start = new Date(`${yyyyMmDd}T00:00:00.000Z`);
-  const end = new Date(`${yyyyMmDd}T00:00:00.000Z`);
-  end.setUTCDate(end.getUTCDate() + 1);
-  if (isNaN(start.getTime())) {
-    throw new BadRequestException('Invalid date');
+  /**
+   * DEPRECATED: This function is no longer used by the payroll service.
+   * It was replaced by fetching from prisma.driver.
+   */
+  private async getAirtableDrivers(): Promise<any[]> {
+    // This function is no longer called by the new payroll logic.
+    // It is kept here only for reference if other parts of the app use it.
+    // The new logic uses `this.prisma.driver.findFirst(...)`
+    this.logger.warn(
+      'getAirtableDrivers() is deprecated for payroll calculation.',
+    );
+    return [];
   }
-  return { start, end };
 }

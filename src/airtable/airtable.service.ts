@@ -1,5 +1,5 @@
 // src/auth/auth.service.ts
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma.service';
 import { Z_ASCII } from 'zlib';
 
@@ -7,6 +7,7 @@ import { Z_ASCII } from 'zlib';
 export class AirtableService {
   constructor(private prisma: PrismaService) {}
 
+  
   async Drivers() {
     try {
       const response = await fetch(
@@ -82,6 +83,72 @@ export class AirtableService {
       );
     }
   }
+  // ➕ CREATE new driver
+  async addDriver(data: any) {
+    try {
+      const fullName = `${data.firstName} ${data.lastName}`.trim();
+      const newDriver = await this.prisma.driver.create({
+        data: {
+          firstName: data.firstName,
+          lastName: data.lastName,
+          fullName,
+          Status: data.Status,
+          phoneNumber: data.phoneNumber,
+          email: data.email,
+          OFIDNumber: data.OFIDNumber,
+          salaryType: data.salaryType,
+          schedule: data.schedule,
+          dayoftheweek: data.dayoftheweek,
+          driverAvailableToday: data.driverAvailableToday,
+        },
+      });
+      return newDriver;
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to create driver');
+    }
+  }
+
+  // ✏️ UPDATE existing driver
+  async editDriver(id: number, data: any) {
+    const driver = await this.prisma.driver.findUnique({ where: { id } });
+    if (!driver) throw new NotFoundException('Driver not found');
+
+    try {
+      const updated = await this.prisma.driver.update({
+        where: { id },
+        data: {
+          firstName: data.firstName ?? driver.firstName,
+          lastName: data.lastName ?? driver.lastName,
+          fullName: data.fullName ?? `${data.firstName ?? driver.firstName} ${data.lastName ?? driver.lastName}`,
+          Status: data.Status ?? driver.Status,
+          phoneNumber: data.phoneNumber ?? driver.phoneNumber,
+          email: data.email ?? driver.email,
+          OFIDNumber: data.OFIDNumber ?? driver.OFIDNumber,
+          salaryType: data.salaryType ?? driver.salaryType,
+          schedule: data.schedule ?? driver.schedule,
+          dayoftheweek: data.dayoftheweek ?? driver.dayoftheweek,
+          driverAvailableToday: data.driverAvailableToday ?? driver.driverAvailableToday,
+        },
+      });
+      return updated;
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to update driver');
+    }
+  }
+
+  // ❌ DELETE driver
+  async deleteDriver(id: number) {
+    const driver = await this.prisma.driver.findUnique({ where: { id } });
+    if (!driver) throw new NotFoundException('Driver not found');
+
+    try {
+      await this.prisma.driver.delete({ where: { id } });
+      return { id, deleted: true };
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to delete driver');
+    }
+  }
+
 
   async customroutes() {
     const routes =  await this.prisma.route.createMany({
@@ -790,4 +857,134 @@ export class AirtableService {
     });
     return routes;
   }
+
+
+async fetchAndSavePayroll() {
+  // Step 1: Fetch data from Airtable
+  const records = await this.PayRolls();
+
+  if (!Array.isArray(records) || records.length === 0) {
+    console.warn("⚠️ No payroll records fetched from Airtable");
+    return { message: "No payroll records found in Airtable", count: 0 };
+  }
+
+  let savedCount = 0;
+
+  // Step 2: Save each record into the database
+  for (const fields of records) {
+    try {
+      const driverId = Number(fields["Driver ID"]) || null;
+      const driverName = fields["Driver Name"] ?? "Unknown";
+
+      console.log(`📥 Saving payroll record for driver: ${driverName}`);
+
+      await this.prisma.airtablePayroll.create({
+        data: {
+          driverId,
+          payrollGeneratedOn: fields["Payroll Generated On:"]
+            ? new Date(fields["Payroll Generated On:"])
+            : null,
+          payPeriod: fields["Pay Period"] ?? null,
+          directDepositDate: fields["Direct Deposit / Paycheck"]
+            ? new Date(fields["Direct Deposit / Paycheck"])
+            : null,
+          weekNumber: fields["Week Number"]
+            ? Number(fields["Week Number"])
+            : null,
+          driver: Array.isArray(fields["Driver"])
+            ? fields["Driver"].join(",")
+            : fields["Driver"] ?? null,
+          stops: Array.isArray(fields["Stops"])
+            ? fields["Stops"].join(",")
+            : fields["Stops"] ?? null,
+          totalFromStops: Number(fields["Total from Stops"]) || 0,
+          totalBonus: Number(fields["Total Bonus"]) || 0,
+          totalDeductions: Number(fields["Total Deductions"]) || 0,
+          netPay: Number(fields["Net Pay"]) || 0,
+          driverName,
+          payrollSummary: Array.isArray(fields["Payroll Summary"])
+            ? fields["Payroll Summary"].join(",")
+            : fields["Payroll Summary"] ?? null,
+          totalStopsCompleted: Number(fields["Total Stops Completed"]) || 0,
+          salaryType: Array.isArray(fields["Salary Type"])
+            ? fields["Salary Type"].join(",")
+            : fields["Salary Type"] ?? null,
+          subtotal: Number(fields["Subtotal"]) || 0,
+          created: fields["Created"]
+            ? new Date(fields["Created"])
+            : new Date(),
+        },
+      });
+
+      console.log(`✅ Saved payroll for driver: ${driverName}`);
+      savedCount++;
+    } catch (error) {
+      console.error(
+        `❌ Error saving payroll for driver ${fields["Driver Name"] || "Unknown"}:`,
+        error.message
+      );
+    }
+  }
+
+  console.log(`🏁 Finished saving ${savedCount} payroll records`);
+  return { message: "Payrolls saved successfully", count: savedCount };
+}
+
+
+  
+
+  async fetchAndSaveDrivers() {
+    const data = await this.Drivers();
+  
+    for (const record of data) {
+      const email = record["Email"];
+  
+      // ✅ Skip records without an email
+      if (!email) {
+        console.warn("Skipping record with no email:", record["Full Name"]);
+        continue;
+      }
+  
+      // ✅ Check if the driver already exists
+      const existingDriver = await this.prisma.driver.findUnique({
+        where: { email },
+      });
+  
+      if (existingDriver) {
+        console.log(`Driver already exists, skipping: ${email}`);
+        continue;
+      }
+  
+      // ✅ Create new driver
+      await this.prisma.driver.create({
+        data: {
+          fullName: record["Full Name"] ?? "",
+          firstName: record["First Name"] ?? "",
+          lastName: record["Last Name"] ?? "",
+          Status: record["Status"] ?? "",
+          phoneNumber: record["Phone Number"] ?? "",
+          email ,
+          OFIDNumber: record["OFID Number"] ?? null,
+          salaryType: record["Salary Type"] ?? "",
+          schedule: { set: record["Schedule"] ?? [] }, // ✅ Correct array format
+          dayoftheweek: record["Day of the Week"] ?? "",
+          driverAvailableToday:
+            record["Driver Available Today?"]?.toLowerCase() === "yes",
+        },
+      });
+    }
+  
+    return { message: "All unique drivers saved successfully" };
+  }
+
+  async getPayrolls(){
+    const data = await this.prisma.airtablePayroll.findMany();
+    return data;
+  }
+  
+  async getDrivers(){
+    const data = await this.prisma.driver.findMany();
+    return data;
+  }
+  
 }
