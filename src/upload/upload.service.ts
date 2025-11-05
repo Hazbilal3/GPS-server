@@ -9,6 +9,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import * as XLSX from 'xlsx';
+import * as csv from 'csv-parser'; // You would need to add a CSV-parsing library
+import { Readable } from 'stream';
 import axios from 'axios';
 import haversineDistance from 'haversine-distance';
 import { PrismaService } from 'src/prisma.service';
@@ -401,7 +403,9 @@ export class UploadService {
     const uploads: UploadRowDto[] = [];
     const skipped: any[] = [];
 
-    const createdAtOverride = date ? utcStartOfDay(date) : undefined;
+    // const createdAtOverride = date ? utcStartOfDay(date) : undefined;
+    const createdAtOverride = date ? new Date(`${date}T12:00:00Z`) : undefined;
+
 
     const transactionResult = await this.prisma.$transaction(
       async (prisma) => {
@@ -424,8 +428,11 @@ export class UploadService {
           const addressRaw = String(row['Address'] ?? '');
           const gpsLocation = String(row['Last GPS location'] ?? '');
           const sequenceNo = String(row['Seq No'] ?? '');
-          const lastEvent = String(row['Last Event'] ?? '');
-          const lastEventTime = String(row['Last Event time'] ?? '');
+const lastEvent = String(row['Last Event'] ?? '')
+  .replace(/\s+/g, ' ')  // collapse multiple spaces
+  .trim()
+  .toLowerCase();
+            const lastEventTime = String(row['Last Event time'] ?? '');
           let expectedLat: number | null = null;
           let expectedLng: number | null = null;
           let distanceKm: number | null = null;
@@ -664,13 +671,19 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
     this.logger.log(`💰 ${driverName} | SalaryType: ${salaryType}`);
 
     // 2. Fetch uploads for this driver
-    const driverUploads = await prisma.upload.findMany({
-      where: {
-        driverId,
-        lastevent: { equals: 'delivered', mode: 'insensitive' },
-      },
-      select: { address: true, createdAt: true },
-    });
+// In calculateAndSavePayrollForDriver
+const driverUploads = await prisma.upload.findMany({
+  where: {
+    driverId,
+    lastevent: {
+      contains: 'delivered',
+      mode: 'insensitive',
+    },
+  },
+  select: { address: true, createdAt: true },
+});
+
+
 
     if (driverUploads.length === 0) {
       this.logger.warn(`No 'delivered' uploads found for ${driverName}.`);
