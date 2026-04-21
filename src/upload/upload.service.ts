@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
+﻿/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
@@ -1290,4 +1290,23 @@ private async getAirtableDrivers(): Promise<any[]> {
     );
     return [];
   }
+
+  async updateRoute(
+    id: number,
+    data: {
+      ratePerStop?: number;
+      ratePerStopCompanyVehicle?: number;
+      baseRate?: number;
+      baseRateCompanyVehicle?: number;
+    },
+  ) {
+    const updateData: any = {};
+    if (data.ratePerStop !== undefined) updateData.ratePerStop = Number(data.ratePerStop);
+    if (data.ratePerStopCompanyVehicle !== undefined) updateData.ratePerStopCompanyVehicle = Number(data.ratePerStopCompanyVehicle);
+    if (data.baseRate !== undefined) updateData.baseRate = Number(data.baseRate);
+    if (data.baseRateCompanyVehicle !== undefined) updateData.baseRateCompanyVehicle = Number(data.baseRateCompanyVehicle);
+    const updated = await this.prisma.route.update({ where: { id }, data: updateData });
+    this.logger.log('Route ' + id + ' rates updated. Future payroll will use new rates.');
+    return updated;
+  }
 }
