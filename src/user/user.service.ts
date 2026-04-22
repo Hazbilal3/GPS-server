@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CreateDriverDto, UpdateDriverDto } from './user.entity';
@@ -37,7 +38,27 @@ export class DriverService {
       throw new NotFoundException(`Driver with driverId ${driverId} not found`);
     }
 
-    await this.prisma.user.delete({ where: { id: driver.id } });
+    try {
+      await this.prisma.$transaction(async (prisma) => {
+        // Export references User.id and Upload.id, so delete it first
+        await prisma.export.deleteMany({ where: { driverId: driver.id } });
+        
+        if (driver.driverId !== null) {
+          // Upload references User.driverId
+          await prisma.upload.deleteMany({ where: { driverId: driver.driverId } });
+          // Dispute references User.driverId
+          await prisma.dispute.deleteMany({ where: { driverId: driver.driverId } });
+          // Payroll references User.driverId
+          await prisma.payroll.deleteMany({ where: { driverId: driver.driverId } });
+        }
+        
+        // Finally delete the user
+        await prisma.user.delete({ where: { id: driver.id } });
+      });
+    } catch (error) {
+      console.error('Error deleting user/driver:', error);
+      throw new InternalServerErrorException('Failed to delete driver: ' + error.message);
+    }
 
     return {
       message: 'Driver deleted successfully',

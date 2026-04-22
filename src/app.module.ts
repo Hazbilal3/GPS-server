@@ -12,14 +12,13 @@ import { DriverController } from './user/user.controller';
 import { DriverService } from './user/user.service';
 import { AirtableService } from './airtable/airtable.service';
 import { AirtableController } from './airtable/airtable.controller';
+import { DisputeModule } from './dispute/dispute.module';
 
 @Module({
-  // eslint-disable-next-line prettier/prettier
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, DisputeModule],
   controllers: [
     UploadController,
     ReportController,
-    DriverController,
     DriverController,
     AirtableController,
   ],

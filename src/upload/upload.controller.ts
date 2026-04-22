@@ -83,6 +83,14 @@ export class UploadController {
     return this.uploadService.updatePayrollDeduction(body);
   }
 
+  @Patch('payroll/bonus')
+  async updatePayrollBonus(
+    @Body()
+    body: { driverId: number; weekNumber: number; totalBonus: number },
+  ) {
+    return this.uploadService.updatePayrollBonus(body);
+  }
+
   @Post('payroll/calculate')
   async recalculateAllPayroll() {
     return this.uploadService.recalculateAllPayroll();
@@ -91,6 +99,25 @@ export class UploadController {
   @Get('customroute')
   async getRoute(): Promise<any[]> {
     return this.uploadService.getAirtableRoutes();
+  }
+
+  @Post('route')
+  async createRoute(
+    @Body()
+    body: {
+      routeNumber?: string;
+      description: string;
+      ratePerStop: number;
+      ratePerStopCompanyVehicle?: number;
+      baseRate?: number;
+      baseRateCompanyVehicle?: number;
+      zone?: string;
+      status?: string;
+      zipCode?: string[];
+      schedule?: string[];
+    },
+  ) {
+    return this.uploadService.createRoute(body);
   }
 
   @Patch('route/:id')

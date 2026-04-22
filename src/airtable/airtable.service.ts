@@ -145,7 +145,8 @@ export class AirtableService {
       await this.prisma.driver.delete({ where: { id } });
       return { id, deleted: true };
     } catch (error) {
-      throw new InternalServerErrorException('Failed to delete driver');
+      console.error('Error deleting driver:', error);
+      throw new InternalServerErrorException('Failed to delete driver: ' + error.message);
     }
   }
 
