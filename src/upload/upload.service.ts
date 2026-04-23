@@ -1125,188 +1125,75 @@ const driverUploads = await prisma.upload.findMany({
     }
   }
 
-  // [ADD THIS NEW METHOD to UploadService class]
-// [ADD THIS NEW METHOD to UploadService class]
-// [REPLACE THIS ENTIRE METHOD]
-async getDailyPayroll(driverId?: number): Promise<any[]> {
-  this.logger.log(`Fetching daily payroll... Driver: ${driverId ?? 'All'}`);
+  async getDailyPayroll(driverId?: number): Promise<any[]> {
+    this.logger.log(`Fetching daily payroll... Driver: ${driverId ?? 'All'}`);
 
-  const airtableRoutes = await this.getAirtableRoutes();
+    // 1. Get relevant user IDs
+    const driverFilter = driverId ? { driverId } : { driverId: { not: null } };
+    const drivers = await this.prisma.user.findMany({ where: driverFilter });
+    const driverIds = drivers.map((d) => d.driverId).filter(Boolean) as number[];
+    if (driverIds.length === 0) return [];
 
-  // 1. Get all drivers (if admin) or one driver
-  const driverFilter = driverId ? { driverId } : { driverId: { not: null } };
-  const drivers = await this.prisma.user.findMany({ where: driverFilter });
-  const allAirtableDrivers = await this.prisma.driver.findMany();
-
-  // --- NEW: Fetch all payroll records to get deductions ---
-  const driverIds = drivers.map((d) => d.driverId).filter(Boolean) as number[];
-  const existingPayrolls = await this.prisma.payroll.findMany({
-    where: { driverId: { in: driverIds } },
-    select: { driverId: true, weekNumber: true, totalDeduction: true, totalBonus: true, salaryType: true, zipBreakdown: true },
-  });
-
-  // --- NEW: Create a quick lookup map for deductions ---
-  // Key: "driverId-weekKey", Value: totalDeduction
-  const deductionMap = new Map<string, number>();
-  const bonusMap = new Map<string, number>();
-  for (const p of existingPayrolls) {
-    deductionMap.set(`${p.driverId}-${p.weekNumber}`, p.totalDeduction);
-    bonusMap.set(`${p.driverId}-${p.weekNumber}`, (p as any).totalBonus || 0);
-  }
-
-  // 2. Get all 'delivered' uploads for the relevant drivers
-  const allUploads = await this.prisma.upload.findMany({
-    where: {
-      ...driverFilter,
-      lastevent: {
-        contains: 'delivered',
-        mode: 'insensitive',
+    // 2. Read stored weekly payroll records — these hold historically-accurate
+    //    amounts (rates frozen at upload time, not recalculated from current routes).
+    const storedPayrolls = await this.prisma.payroll.findMany({
+      where: { driverId: { in: driverIds } },
+      select: {
+        driverId: true,
+        driverName: true,
+        weekNumber: true,
+        totalDeduction: true,
+        totalBonus: true,
+        zipBreakdown: true,
       },
-    },
-    select: {
-      driverId: true,
-      address: true,
-      createdAt: true,
-    },
-  });
+      orderBy: { weekNumber: 'desc' },
+    });
 
-  // 3. Group uploads by Driver ID
-  const uploadsByDriver = new Map<number, any[]>();
-  for (const upload of allUploads) {
-    if (!upload.driverId) continue;
-    if (!uploadsByDriver.has(upload.driverId)) {
-      uploadsByDriver.set(upload.driverId, []);
-    }
-    uploadsByDriver.get(upload.driverId)!.push(upload);
-  }
+    // 3. Derive daily records from stored zipBreakdown (each entry has a date field)
+    const dailyRecords: {
+      driverId: number;
+      driverName: string | null;
+      date: string;
+      totalStops: number;
+      subtotal: number;
+      deduction: number;
+      bonus: number;
+      netPay: number;
+    }[] = [];
 
-  // --- FIX: Explicitly type the dailyRecords array ---
-  const dailyRecords: {
-    driverId: number;
-    driverName: string | null;
-    date: string;
-    totalStops: number;
-    subtotal: number;
-    deduction: number;
-    bonus: number; // <-- NEW
-    netPay: number;
-  }[] = [];
+    for (const payroll of storedPayrolls) {
+      const breakdown = (payroll.zipBreakdown as any[]) || [];
 
-  const normalizeZip = (zip?: string): string | null => {
-    if (!zip) return null;
-    const match = zip.match(/\d{4,5}/);
-    if (!match) return null;
-    let z = match[0];
-    if (z.length === 4) z = '0' + z;
-    return z;
-  };
-  const extractRouteZips = (route: any): string[] => {
-    if (!route.zipCode) return [];
-    const raw = Array.isArray(route.zipCode)
-      ? route.zipCode
-      : String(route.zipCode).split(/[, ]+/);
-    return raw
-      .map((z) => normalizeZip(String(z)))
-      .filter(Boolean) as string[];
-  };
-
-  // 4. Process each driver
-  for (const [driverId, driverUploads] of uploadsByDriver.entries()) {
-    const driver = drivers.find((d) => d.driverId === driverId);
-    const airtableDriver = allAirtableDrivers.find(
-      (d) => d.OFIDNumber === driverId,
-    );
-    if (!driver || !airtableDriver) continue;
-
-    // 5. Group this driver's uploads by Day
-    const uploadsByDay = new Map<string, any[]>(); // Key: "YYYY-MM-DD"
-    const daysPerWeek = new Map<number, Set<string>>(); // key: weekKey, value: Set of dates
-
-    for (const upload of driverUploads) {
-      const dateKey = upload.createdAt.toISOString().split('T')[0];
-      const { key: weekKey } = getPayrollWeekKey(upload.createdAt);
-      
-      if (!uploadsByDay.has(dateKey)) uploadsByDay.set(dateKey, []);
-      uploadsByDay.get(dateKey)!.push(upload);
-
-      if (!daysPerWeek.has(weekKey)) daysPerWeek.set(weekKey, new Set<string>());
-      daysPerWeek.get(weekKey)!.add(dateKey);
-    }
-
-    // 6. Calculate for each day
-    for (const [date, dayUploads] of uploadsByDay.entries()) {
-      const totalStops = dayUploads.length;
-      let subtotal = 0;
-
-      // --- FIX: Check the weekly breakdown for this specific day's settings ---
-      const { key: weekKey } = getPayrollWeekKey(new Date(date));
-      const weeklyRecord = existingPayrolls.find(p => p.driverId === driverId && p.weekNumber === weekKey);
-
-      // --- NEW: Use the salary type CAPTURED on the upload itself ---
-      const typesOnDay = dayUploads.map(u => (u.salaryType || '').toLowerCase()).filter(Boolean);
-      let daySalaryType = typesOnDay.length > 0 ? typesOnDay[0] : (airtableDriver.salaryType || 'regular').toLowerCase();
-
-      // Normalize
-      if (daySalaryType.includes('fixed')) daySalaryType = 'fixed rate';
-      else if (daySalaryType.includes('company')) daySalaryType = 'company vehicle';
-      else daySalaryType = 'regular';
-
-      if (daySalaryType === 'fixed rate') {
-        const capturedRate = dayUploads.find(u => u.rate > 0)?.rate;
-        subtotal = capturedRate || (airtableDriver as any).fixedSalary || 0;
-      } else {
-        // --- Standard Rate Logic ---
-        const uploadsByZip: Record<string, number> = {};
-        for (const upload of dayUploads) {
-          const zip = normalizeZip(upload.address);
-          if (zip) uploadsByZip[zip] = (uploadsByZip[zip] || 0) + 1;
-        }
-
-        for (const [zip, stopCount] of Object.entries(uploadsByZip)) {
-          const route = airtableRoutes.find(r => extractRouteZips(r).includes(zip));
-          let rate = 0;
-          if (route) {
-            if (daySalaryType.includes('company vehicle')) rate = route.ratePerStopCompanyVehicle || 0;
-            else rate = route.ratePerStop || 0;
-          } else {
-            // Fallback to historical ZIP rate if route missing
-            const hist = weeklyRecord?.zipBreakdown && Array.isArray(weeklyRecord.zipBreakdown) 
-              ? (weeklyRecord.zipBreakdown as any[]).find(b => b.zip === zip && b.rate > 0)
-              : null;
-            if (hist) rate = hist.rate;
-          }
-          subtotal += (stopCount * rate);
-        }
+      // Group breakdown entries by date (only new-format records include date)
+      const byDate: Record<string, any[]> = {};
+      for (const entry of breakdown) {
+        if (!entry.date) continue;
+        if (!byDate[entry.date]) byDate[entry.date] = [];
+        byDate[entry.date].push(entry);
       }
 
-      // --- NEW: Prorate the deduction ---
-      const { key: currentWeekKey } = getPayrollWeekKey(
-        new Date(date),
-      );
-      const daysInThisWeek = daysPerWeek.get(currentWeekKey)?.size || 1;
-      const weeklyDeduction =
-        deductionMap.get(`${driverId}-${currentWeekKey}`) || 0;
-      const weeklyBonus =
-        bonusMap.get(`${driverId}-${currentWeekKey}`) || 0;
-      const proratedDeduction = weeklyDeduction / daysInThisWeek;
-      const proratedBonus = weeklyBonus / daysInThisWeek;
-      const netPay = subtotal - proratedDeduction + proratedBonus;
-      // --- End of new logic ---
+      const numDays = Object.keys(byDate).length || 1;
+      const proratedDeduction = (payroll.totalDeduction || 0) / numDays;
+      const proratedBonus = ((payroll.totalBonus as number) || 0) / numDays;
 
-      dailyRecords.push({
-        driverId,
-        driverName: driver.fullName,
-        date,
-        totalStops,
-        subtotal: Number(subtotal.toFixed(2)),
-        deduction: Number(proratedDeduction.toFixed(2)),
-        bonus: Number(proratedBonus.toFixed(2)),
-        netPay: Number(netPay.toFixed(2)),
-      });
+      for (const [date, entries] of Object.entries(byDate)) {
+        const totalStops = entries.reduce((s: number, e: any) => s + (e.stops || 0), 0);
+        const subtotal = entries.reduce((s: number, e: any) => s + (e.amount || 0), 0);
+        const netPay = subtotal - proratedDeduction + proratedBonus;
+
+        dailyRecords.push({
+          driverId: payroll.driverId,
+          driverName: payroll.driverName,
+          date,
+          totalStops,
+          subtotal: Number(subtotal.toFixed(2)),
+          deduction: Number(proratedDeduction.toFixed(2)),
+          bonus: Number(proratedBonus.toFixed(2)),
+          netPay: Number(netPay.toFixed(2)),
+        });
       }
     }
 
-    // 7. Sort and return
     return dailyRecords.sort(
       (a, b) =>
         b.date.localeCompare(a.date) ||
