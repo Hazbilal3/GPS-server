@@ -133,4 +133,9 @@ export class UploadController {
   ) {
     return this.uploadService.updateRoute(id, body);
   }
+
+  @Delete('route/:id')
+  async deleteRoute(@Param('id', ParseIntPipe) id: number) {
+    return this.uploadService.deleteRoute(id);
+  }
 }

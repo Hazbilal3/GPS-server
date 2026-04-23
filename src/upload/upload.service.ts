@@ -1373,8 +1373,13 @@ private async getAirtableDrivers(): Promise<any[]> {
         zone: data.zone || null,
         status: data.status || 'Active',
         zipCode: data.zipCode || [],
-        schedule: data.schedule || [],
       },
     });
+  }
+
+  async deleteRoute(id: number) {
+    const deleted = await this.prisma.route.delete({ where: { id } });
+    this.logger.log('Route ' + id + ' deleted.');
+    return deleted;
   }
 }
