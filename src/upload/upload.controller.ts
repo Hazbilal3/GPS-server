@@ -78,7 +78,7 @@ export class UploadController {
   @Patch('payroll/deduction')
   async updatePayrollDeduction(
     @Body()
-    body: { driverId: number; weekNumber: number; totalDeduction: number },
+    body: { driverId: number; weekNumber: number; totalDeduction: number; remarks?: string },
   ) {
     return this.uploadService.updatePayrollDeduction(body);
   }
@@ -94,6 +94,11 @@ export class UploadController {
   @Post('payroll/calculate')
   async recalculateAllPayroll() {
     return this.uploadService.recalculateAllPayroll();
+  }
+
+  @Delete('payroll/week/:weekNumber')
+  async deletePayrollByWeek(@Param('weekNumber', ParseIntPipe) weekNumber: number) {
+    return this.uploadService.deletePayrollByWeek(weekNumber);
   }
 
   @Get('customroute')

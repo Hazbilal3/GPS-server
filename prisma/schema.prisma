@@ -44,6 +44,8 @@ model Upload {
   googleMapsLink String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  salaryType     String?  // Capture type at time of upload
+  rate           Float?   // Capture rate if applicable
   exports        Export[]
 }
 
@@ -82,6 +84,7 @@ model Payroll {
   totalDeduction  Float    @default(0)
   totalBonus      Float    @default(0)
   netPay          Float
+  remarks         String?
   createdAt       DateTime @default(now())
 
   driver User @relation(fields: [driverId], references: [driverId])
@@ -139,6 +142,7 @@ model Driver {
   email                String   @unique
   OFIDNumber           Int?
   salaryType           String
+  fixedSalary          Float?
   schedule             String[]
   dayoftheweek         String?
   driverAvailableToday Boolean?

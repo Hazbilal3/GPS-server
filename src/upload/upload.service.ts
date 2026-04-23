@@ -458,6 +458,7 @@ export class UploadService {
 
     const uploads: UploadRowDto[] = [];
     const skipped: any[] = [];
+    const allAirtableDrivers = await this.prisma.driver.findMany();
 
     // const createdAtOverride = date ? utcStartOfDay(date) : undefined;
     const createdAtOverride = date ? new Date(`${date}T12:00:00Z`) : undefined;
@@ -541,6 +542,10 @@ const lastEvent = String(row['Last Event'] ?? '')
             status = status ?? 'geocoded';
           }
 
+          const airtableDriver = allAirtableDrivers.find(d => d.OFIDNumber === Number(fkValue));
+          const currentSalaryType = airtableDriver?.salaryType || 'Regular';
+          const currentFixedRate = airtableDriver?.fixedSalary || 0;
+
           const saved = await prisma.upload.create({
             data: {
               driverId: fkValue,
@@ -555,7 +560,9 @@ const lastEvent = String(row['Last Event'] ?? '')
               distanceKm,
               status,
               googleMapsLink,
-              ...(createdAtOverride ? { createdAt: createdAtOverride } : {}),
+              salaryType: currentSalaryType,
+              rate: currentSalaryType.toLowerCase().includes('fixed') ? currentFixedRate : null,
+              createdAt: createdAtOverride || new Date(),
             },
           });
 
@@ -567,7 +574,8 @@ const lastEvent = String(row['Last Event'] ?? '')
           this.logger.log(
             `Uploads saved for driver ${driverId}. Recalculating payroll...`,
           );
-          await this.calculateAndSavePayrollForDriver(driverId, user, prisma);
+          const uploadDate = createdAtOverride || new Date();
+          await this.calculateAndSavePayrollForDriver(driverId, user, prisma, uploadDate);
         } else {
         this.logger.log(
             `No new uploads for driver ${driverId}. Skipping payroll calculation.`,
@@ -660,9 +668,10 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
     // calculateAndSavePayrollForDriver will recalculate ALL weeks for this driver,
     // which correctly updates the modified week.
     this.logger.log(
-      `Uploads deleted for driver ${driverId}, recalculating all payroll for this driver...`,
+      `Uploads deleted for driver ${driverId}, recalculating affected week...`,
     );
-    await this.calculateAndSavePayrollForDriver(driverId, user, this.prisma);
+    const deletedDate = new Date(`${dateStr}T12:00:00.000Z`);
+    await this.calculateAndSavePayrollForDriver(driverId, user, this.prisma, deletedDate);
 
     return {
       driverId,
@@ -677,6 +686,13 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
    * NEW: This function recalculates and saves payroll for ALL drivers.
    * Triggered by the new controller endpoint.
    */
+  async deletePayrollByWeek(weekNumber: number) {
+    this.logger.warn(`🗑️ Deleting all payroll records for week ${weekNumber}`);
+    return await this.prisma.payroll.deleteMany({
+      where: { weekNumber },
+    });
+  }
+
   async recalculateAllPayroll() {
     this.logger.log('Starting global payroll recalculation for all drivers...');
     const drivers = await this.prisma.user.findMany({
@@ -719,15 +735,26 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
     driverId: number,
     driver: User,
     prisma: Prisma.TransactionClient | PrismaService,
+    uploadDate?: Date,
   ) {
     const driverName = driver.fullName;
 
     // 1. Fetch routes and driver's Airtable info
-    const airtableRoutes = await this.getAirtableRoutes();
-
-    const airtableDriver = await this.prisma.driver.findFirst({
-      where: { OFIDNumber: driverId },
-    });
+    const [airtableRoutes, airtableDriver, existingPayrolls] = await Promise.all([
+      this.getAirtableRoutes(),
+      this.prisma.driver.findFirst({ where: { OFIDNumber: driverId } }),
+      this.prisma.payroll.findMany({
+        where: { driverId },
+        select: { 
+          weekNumber: true, 
+          salaryType: true, 
+          zipBreakdown: true,
+          totalDeduction: true,
+          totalBonus: true,
+          remarks: true
+        },
+      }),
+    ]);
 
     if (!airtableDriver) {
       this.logger.warn(
@@ -735,9 +762,6 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
       );
       return;
     }
-
-    const salaryType = (airtableDriver.salaryType || '').toLowerCase();
-    this.logger.log(`💰 ${driverName} | SalaryType: ${salaryType}`);
 
     // 2. Fetch uploads for this driver
 // In calculateAndSavePayrollForDriver
@@ -749,7 +773,7 @@ const driverUploads = await prisma.upload.findMany({
       mode: 'insensitive',
     },
   },
-  select: { address: true, createdAt: true },
+  select: { address: true, createdAt: true, salaryType: true, rate: true },
 });
 
 
@@ -774,11 +798,6 @@ const driverUploads = await prisma.upload.findMany({
     // 3. Group uploads by week
     const uploadsByWeek = groupUploadsByWeek(driverUploads);
 
-    // --- Special driver constants ---
-    const FIXED_RATE_DRIVER_ID = 254309;
-    const FIXED_RATE_DRIVER_NAME = 'Carlos Jose Velez';
-    const FIXED_DAILY_RATE = 245;
-
     // --- Helpers ---
     const normalizeZip = (zip?: string): string | null => {
       if (!zip) return null;
@@ -802,111 +821,124 @@ const driverUploads = await prisma.upload.findMany({
       const weekNumber = Number(weekNumberStr);
       const totalStops = weekUploads.length;
 
-      // --- Count stops by ZIP ---
-      const uploadsByZip: Record<string, number> = {};
-      for (const upload of weekUploads) {
-        const zip = normalizeZip(zipFilter(upload.address) || undefined);
-        if (!zip) continue;
-        uploadsByZip[zip] = (uploadsByZip[zip] || 0) + 1;
+      // When called from a specific upload event, only recalculate the affected week.
+      // All other weeks already have correct payroll — skip them to prevent
+      // route/salary-type changes from rewriting historical records.
+      if (uploadDate) {
+        const { key: targetWeekKey } = getPayrollWeekKey(uploadDate);
+        if (weekNumber !== targetWeekKey) continue;
       }
 
-      let totalAmount = 0;
-      const zipBreakdown: {
-        zip: string;
-        stops: number;
-        rate: number;
-        amount: number;
-      }[] = [];
+      // Group week uploads by day
+      const weekUploadsByDay: Record<string, any[]> = {};
+      for (const upload of weekUploads) {
+        const dateKey = upload.createdAt.toISOString().split('T')[0];
+        if (!weekUploadsByDay[dateKey]) weekUploadsByDay[dateKey] = [];
+        weekUploadsByDay[dateKey].push(upload);
+      }
 
-      if (
-        driverId === FIXED_RATE_DRIVER_ID ||
-        driverName === FIXED_RATE_DRIVER_NAME
-      ) {
-        // --- Special Fixed Rate Logic ---
-        const uniqueDays = new Set<string>();
-        for (const upload of weekUploads) {
-          uniqueDays.add(upload.createdAt.toISOString().split('T')[0]);
-        }
-        const daysWorked = uniqueDays.size;
-        totalAmount = daysWorked * FIXED_DAILY_RATE;
+      // --- FIX: Fetch existing record to check daily history ---
+      const existing = existingPayrolls.find((p) => p.weekNumber === weekNumber);
+      const existingBreakdown = (existing?.zipBreakdown as any[]) || [];
 
-        zipBreakdown.push({
-          zip: 'N/A', // Changed from 'N/A'
-          stops: totalStops, // Using total stops for consistency
-          rate: FIXED_DAILY_RATE,
-          amount: totalAmount,
-        });
+      let weeklySubtotal = 0;
+      const zipBreakdown: any[] = [];
+      const usedSalaryTypes = new Set<string>();
 
-        this.logger.log(
-          `💵 FIXED RATE: ${driverName} | Days: ${daysWorked} | Rate: ${FIXED_DAILY_RATE} | Total: ${totalAmount.toFixed(2)}`,
-        );
-      } else {
-        // --- Standard Rate Logic ---
-        for (const [zip, stopCount] of Object.entries(uploadsByZip)) {
-          const route = airtableRoutes.find((r) => {
-            const routeZips = extractRouteZips(r);
-            return routeZips.includes(zip);
+      // Check if existing record is legacy (no dates in breakdown)
+      const isLegacy = existingBreakdown.length > 0 && !existingBreakdown.some(b => b.date);
+      const legacyWeeklyType = isLegacy ? (existing?.salaryType || 'regular').toLowerCase() : '';
+
+      // Iterate through each day in the week
+      for (const [dateKey, dayUploads] of Object.entries(weekUploadsByDay)) {
+        // --- NEW: Use the salary type CAPTURED on the upload itself ---
+        // If multiple uploads on same day have different types (rare), we'll use the most frequent one
+        const typesOnDay = dayUploads.map(u => (u.salaryType || '').toLowerCase()).filter(Boolean);
+        let daySalaryType = typesOnDay.length > 0 ? typesOnDay[0] : (airtableDriver.salaryType || 'regular').toLowerCase();
+
+        // Normalize
+        if (daySalaryType.includes('fixed')) daySalaryType = 'fixed rate';
+        else if (daySalaryType.includes('company')) daySalaryType = 'company vehicle';
+        else daySalaryType = 'regular';
+
+        usedSalaryTypes.add(daySalaryType);
+
+        if (daySalaryType === 'fixed rate') {
+          // Use captured rate if available, otherwise current
+          const capturedRate = dayUploads.find(u => u.rate > 0)?.rate;
+          const fixedDailyRate = capturedRate || airtableDriver.fixedSalary || 0;
+          
+          const dayAmount = fixedDailyRate; 
+          weeklySubtotal += dayAmount;
+          zipBreakdown.push({
+            zip: 'N/A',
+            date: dateKey,
+            stops: dayUploads.length,
+            rate: fixedDailyRate,
+            amount: dayAmount,
+            salaryType: 'Fixed Rate'
           });
-
-          let rate = 0;
-          if (route) {
-            if (salaryType.includes('company vehicle')) {
-              rate = Number(route.ratePerStopCompanyVehicle) || 0;
-            } else if (salaryType.includes('fixed')) {
-              rate = Number(route.baseRate) || 0;
-            } else if (salaryType.includes('regular')) {
-              rate = Number(route.ratePerStop) || 0;
-            } else {
-              this.logger.warn(
-                `⚠️ Unknown salary type '${salaryType}' for driver ${driverName}, defaulting to ratePerStop`,
-              );
-              rate = Number(route.ratePerStop) || 0;
-            }
-          } else {
-            this.logger.warn(`⚠️ No exact ZIP match for ${zip}. Rate set to 0.`);
+        } else {
+          // Regular logic for this day
+          const dayZips: Record<string, number> = {};
+          for (const upload of dayUploads) {
+            const zip = normalizeZip(upload.address);
+            if (zip) dayZips[zip] = (dayZips[zip] || 0) + 1;
           }
 
-          const amount = stopCount * rate;
-          totalAmount += amount;
-
-          // --- Save ZIP-level breakdown ---
-          zipBreakdown.push({
-            zip,
-            stops: stopCount,
-            rate: Number(rate.toFixed(2)),
-            amount: Number(amount.toFixed(2)),
-          });
+          for (const [zip, stopCount] of Object.entries(dayZips)) {
+            const route = airtableRoutes.find(r => extractRouteZips(r).includes(zip));
+            // For existing records: always prefer the stored historical rate.
+            // This prevents route rate changes or deletions from rewriting past payroll.
+            const hist = existingBreakdown.find(b => b.zip === zip && b.rate > 0);
+            let rate = 0;
+            if (hist) {
+              rate = hist.rate;
+            } else if (route) {
+              if (daySalaryType.includes('company vehicle')) rate = route.ratePerStopCompanyVehicle || 0;
+              else rate = route.ratePerStop || 0;
+            }
+            
+            const amount = stopCount * rate;
+            weeklySubtotal += amount;
+            zipBreakdown.push({
+              zip,
+              date: dateKey,
+              stops: stopCount,
+              rate,
+              amount,
+              salaryType: daySalaryType.includes('company') ? 'Company Vehicle' : 'Regular'
+            });
+          }
         }
       }
 
-      const finalAmount = Number(totalAmount.toFixed(2));
+      const finalAmount = Number(weeklySubtotal.toFixed(2));
+      const displaySalaryType = usedSalaryTypes.size > 1 ? 'Mixed' : 
+                               Array.from(usedSalaryTypes)[0] === 'fixed rate' ? 'Fixed Rate' :
+                               Array.from(usedSalaryTypes)[0] === 'company vehicle' ? 'Company Vehicle' : 'Regular';
 
       // 5. --- Save to DB using upsert ---
       try {
-        const existingPayroll = await prisma.payroll.findUnique({
-          where: {
-            driverId_weekNumber: { driverId, weekNumber },
-          },
-          select: { totalDeduction: true, totalBonus: true },
-        });
-
-        const totalDeduction = existingPayroll?.totalDeduction || 0;
-        const totalBonus = existingPayroll?.totalBonus || 0;
+        const totalDeduction = existing?.totalDeduction || 0;
+        const totalBonus = existing?.totalBonus || 0;
         const netPay = finalAmount - totalDeduction + totalBonus;
 
+        const allZipsUsed = Array.from(new Set(zipBreakdown.map(z => z.zip).filter(z => z !== 'N/A')));
         const payrollData = {
           driverId,
           driverName: String(driverName),
           weekNumber,
           payPeriod: getWeekDateRange(weekNumber),
-          salaryType: airtableDriver.salaryType,
-          zipCode: Object.keys(uploadsByZip).join(', ') || null,
+          salaryType: displaySalaryType,
+          zipCode: allZipsUsed.join(', ') || null,
           totalDeliveries: totalStops,
           stopsCompleted: totalStops,
           amount: finalAmount,
           totalDeduction,
           totalBonus,
           netPay,
+          remarks: existing?.remarks || null,
           zipBreakdown: zipBreakdown.length > 0 ? zipBreakdown : Prisma.JsonNull, // Save breakdown
         };
 
@@ -946,6 +978,7 @@ const driverUploads = await prisma.upload.findMany({
         totalDeduction: true,
         totalBonus: true,
         netPay: true,
+        remarks: true,
         zipBreakdown: true, // <-- Explicitly select zipBreakdown
       },
       orderBy: {
@@ -988,6 +1021,7 @@ const driverUploads = await prisma.upload.findMany({
         totalDeduction: r.totalDeduction,
         totalBonus: (r as any).totalBonus || 0,
         netPay: r.netPay,
+        remarks: (r as any).remarks || '',
         zipBreakdown: r.zipBreakdown ?? [], // <-- This line should now work
       })),
     }));
@@ -1014,6 +1048,7 @@ const driverUploads = await prisma.upload.findMany({
         totalDeduction: true,
         totalBonus: true,
         netPay: true,
+        remarks: true,
         zipBreakdown: true, // <-- Explicitly select zipBreakdown
       },
     });
@@ -1032,6 +1067,7 @@ const driverUploads = await prisma.upload.findMany({
       totalDeduction: record.totalDeduction,
       totalBonus: (record as any).totalBonus || 0,
       netPay: record.netPay,
+      remarks: record.remarks,
       zipBreakdown: record.zipBreakdown ?? [], // <-- FIX: Return the zipBreakdown
     }));
   }
@@ -1043,10 +1079,12 @@ const driverUploads = await prisma.upload.findMany({
     driverId,
     weekNumber,
     totalDeduction,
+    remarks,
   }: {
     driverId: number;
     weekNumber: number;
     totalDeduction: number;
+    remarks?: string;
   }) {
     // This query now uses the compound unique index
     const existing = await this.prisma.payroll.findUnique({
@@ -1075,6 +1113,7 @@ const driverUploads = await prisma.upload.findMany({
         data: {
           totalDeduction,
           netPay,
+          remarks: remarks ?? existing.remarks,
         },
       });
     } catch (error) {
@@ -1101,16 +1140,16 @@ async getDailyPayroll(driverId?: number): Promise<any[]> {
 
   // --- NEW: Fetch all payroll records to get deductions ---
   const driverIds = drivers.map((d) => d.driverId).filter(Boolean) as number[];
-  const allPayrollDeductions = await this.prisma.payroll.findMany({
+  const existingPayrolls = await this.prisma.payroll.findMany({
     where: { driverId: { in: driverIds } },
-    select: { driverId: true, weekNumber: true, totalDeduction: true, totalBonus: true },
+    select: { driverId: true, weekNumber: true, totalDeduction: true, totalBonus: true, salaryType: true, zipBreakdown: true },
   });
 
   // --- NEW: Create a quick lookup map for deductions ---
   // Key: "driverId-weekKey", Value: totalDeduction
   const deductionMap = new Map<string, number>();
   const bonusMap = new Map<string, number>();
-  for (const p of allPayrollDeductions) {
+  for (const p of existingPayrolls) {
     deductionMap.set(`${p.driverId}-${p.weekNumber}`, p.totalDeduction);
     bonusMap.set(`${p.driverId}-${p.weekNumber}`, (p as any).totalBonus || 0);
   }
@@ -1171,11 +1210,6 @@ async getDailyPayroll(driverId?: number): Promise<any[]> {
       .filter(Boolean) as string[];
   };
 
-  // --- Special driver constants (copied from calculateAndSavePayrollForDriver) ---
-  const FIXED_RATE_DRIVER_ID = 254309;
-  const FIXED_RATE_DRIVER_NAME = 'Carlos Jose Velez';
-  const FIXED_DAILY_RATE = 245;
-
   // 4. Process each driver
   for (const [driverId, driverUploads] of uploadsByDriver.entries()) {
     const driver = drivers.find((d) => d.driverId === driverId);
@@ -1184,71 +1218,64 @@ async getDailyPayroll(driverId?: number): Promise<any[]> {
     );
     if (!driver || !airtableDriver) continue;
 
-    const salaryType = (airtableDriver.salaryType || '').toLowerCase();
-    const driverName = driver.fullName;
-
-    // --- NEW: Find days worked *per week* for this driver ---
-    // This is for prorating deductions
+    // 5. Group this driver's uploads by Day
+    const uploadsByDay = new Map<string, any[]>(); // Key: "YYYY-MM-DD"
     const daysPerWeek = new Map<number, Set<string>>(); // key: weekKey, value: Set of dates
+
     for (const upload of driverUploads) {
       const dateKey = upload.createdAt.toISOString().split('T')[0];
       const { key: weekKey } = getPayrollWeekKey(upload.createdAt);
-      if (!daysPerWeek.has(weekKey)) {
-        daysPerWeek.set(weekKey, new Set<string>());
-      }
-      daysPerWeek.get(weekKey)!.add(dateKey);
-    }
-
-    // 5. Group this driver's uploads by Day
-    const uploadsByDay = new Map<string, any[]>(); // Key: "YYYY-MM-DD"
-    for (const upload of driverUploads) {
-      const dateKey = upload.createdAt.toISOString().split('T')[0];
-      if (!uploadsByDay.has(dateKey)) {
-        uploadsByDay.set(dateKey, []);
-      }
+      
+      if (!uploadsByDay.has(dateKey)) uploadsByDay.set(dateKey, []);
       uploadsByDay.get(dateKey)!.push(upload);
+
+      if (!daysPerWeek.has(weekKey)) daysPerWeek.set(weekKey, new Set<string>());
+      daysPerWeek.get(weekKey)!.add(dateKey);
     }
 
     // 6. Calculate for each day
     for (const [date, dayUploads] of uploadsByDay.entries()) {
       const totalStops = dayUploads.length;
-      let subtotal = 0; // Renamed from totalAmount
+      let subtotal = 0;
 
-      if (
-        driverId === FIXED_RATE_DRIVER_ID ||
-        driverName === FIXED_RATE_DRIVER_NAME
-      ) {
-        // Fixed rate driver gets flat rate per day worked
-        subtotal = FIXED_DAILY_RATE;
+      // --- FIX: Check the weekly breakdown for this specific day's settings ---
+      const { key: weekKey } = getPayrollWeekKey(new Date(date));
+      const weeklyRecord = existingPayrolls.find(p => p.driverId === driverId && p.weekNumber === weekKey);
+
+      // --- NEW: Use the salary type CAPTURED on the upload itself ---
+      const typesOnDay = dayUploads.map(u => (u.salaryType || '').toLowerCase()).filter(Boolean);
+      let daySalaryType = typesOnDay.length > 0 ? typesOnDay[0] : (airtableDriver.salaryType || 'regular').toLowerCase();
+
+      // Normalize
+      if (daySalaryType.includes('fixed')) daySalaryType = 'fixed rate';
+      else if (daySalaryType.includes('company')) daySalaryType = 'company vehicle';
+      else daySalaryType = 'regular';
+
+      if (daySalaryType === 'fixed rate') {
+        const capturedRate = dayUploads.find(u => u.rate > 0)?.rate;
+        subtotal = capturedRate || (airtableDriver as any).fixedSalary || 0;
       } else {
         // --- Standard Rate Logic ---
         const uploadsByZip: Record<string, number> = {};
         for (const upload of dayUploads) {
-          const zip = normalizeZip(zipFilter(upload.address) || undefined);
-          if (!zip) continue;
-          uploadsByZip[zip] = (uploadsByZip[zip] || 0) + 1;
+          const zip = normalizeZip(upload.address);
+          if (zip) uploadsByZip[zip] = (uploadsByZip[zip] || 0) + 1;
         }
 
         for (const [zip, stopCount] of Object.entries(uploadsByZip)) {
-          const route = airtableRoutes.find((r) => {
-            const routeZips = extractRouteZips(r);
-            return routeZips.includes(zip);
-          });
-
+          const route = airtableRoutes.find(r => extractRouteZips(r).includes(zip));
           let rate = 0;
           if (route) {
-            if (salaryType.includes('company vehicle')) {
-              rate = Number(route.ratePerStopCompanyVehicle) || 0;
-            } else if (salaryType.includes('fixed')) {
-              rate = Number(route.baseRate) || 0;
-            } else if (salaryType.includes('regular')) {
-              rate = Number(route.ratePerStop) || 0;
-           } else {
-              rate = Number(route.ratePerStop) || 0;
-            }
+            if (daySalaryType.includes('company vehicle')) rate = route.ratePerStopCompanyVehicle || 0;
+            else rate = route.ratePerStop || 0;
+          } else {
+            // Fallback to historical ZIP rate if route missing
+            const hist = weeklyRecord?.zipBreakdown && Array.isArray(weeklyRecord.zipBreakdown) 
+              ? (weeklyRecord.zipBreakdown as any[]).find(b => b.zip === zip && b.rate > 0)
+              : null;
+            if (hist) rate = hist.rate;
           }
-          const amount = stopCount * rate;
-          subtotal += amount;
+          subtotal += (stopCount * rate);
         }
       }
 

@@ -1,5 +1,5 @@
 // src/airtable/dto/create-driver.dto.ts
-import { IsString, IsEmail, IsOptional, IsInt, IsArray, IsBoolean } from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsInt, IsArray, IsBoolean, IsNumber } from 'class-validator';
 
 export class CreateDriverDto {
   @IsString()
@@ -22,10 +22,16 @@ export class CreateDriverDto {
   OFIDNumber?: number;
 
   @IsString()
-  salaryType: string;
+  @IsOptional()
+  salaryType?: string;
+
+  @IsNumber()
+  @IsOptional()
+  fixedSalary?: number;
 
   @IsArray()
-  schedule: string[];
+  @IsOptional()
+  schedule?: string[];
 
   @IsOptional()
   @IsString()
