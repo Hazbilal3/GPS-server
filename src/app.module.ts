@@ -1,5 +1,5 @@
 import { UploadService } from 'src/upload/upload.service';
-import { GeocodeService } from './geocode/geocode.service';
+// import { GeocodeService } from './geocode/geocode.service'; // temporarily disabled — View Map feature off
 import { UploadController } from './upload/upload.controller';
 import { ConfigModule } from '@nestjs/config';
 import { Module, ValidationPipe } from '@nestjs/common';
@@ -24,7 +24,7 @@ import { DisputeModule } from './dispute/dispute.module';
   ],
   providers: [
     UploadService,
-    GeocodeService,
+    // GeocodeService, // temporarily disabled — View Map feature off
     PrismaService,
     ReportService,
     DriverService,

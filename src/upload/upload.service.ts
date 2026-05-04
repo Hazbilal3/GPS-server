@@ -505,26 +505,38 @@ const lastEvent = String(row['Last Event'] ?? '')
             }
           }
 
+          // ── GEOCODING DISABLED ─────────────────────────────────────────────
+          // Google Maps API calls commented out to prevent billing.
+          // To re-enable: uncomment the block below and remove the status assignment.
+          // if (addressRaw && addressRaw.trim().length > 0) {
+          //   try {
+          //     const geo = await geocodeSmart(addressRaw, {
+          //       gpsBias: gpsForBias || undefined,
+          //     });
+          //     if (geo) {
+          //       expectedLat = geo.lat;
+          //       expectedLng = geo.lng;
+          //       status = geo.partialMatch ? 'partial_match' : 'geocoded';
+          //     } else {
+          //       status = 'geocode_zero_results';
+          //     }
+          //   } catch {
+          //     status = 'geocode_error';
+          //     expectedLat = null;
+          //     expectedLng = null;
+          //   }
+          // } else {
+          //   status = 'no_address';
+          // }
+          // ── Set status without API call ────────────────────────────────────
           if (addressRaw && addressRaw.trim().length > 0) {
-            try {
-              const geo = await geocodeSmart(addressRaw, {
-                gpsBias: gpsForBias || undefined,
-              });
-              if (geo) {
-                expectedLat = geo.lat;
-                expectedLng = geo.lng;
-                status = geo.partialMatch ? 'partial_match' : 'geocoded';
-              } else {
-                status = 'geocode_zero_results';
-              }
-            } catch {
-              status = 'geocode_error';
-              expectedLat = null;
-              expectedLng = null;
-            }
+            status = 'geocode_disabled';
           } else {
             status = 'no_address';
           }
+          expectedLat = null;
+          expectedLng = null;
+          // ───────────────────────────────────────────────────────────────────
 
           if (gpsForBias && expectedLat != null && expectedLng != null) {
             try {
