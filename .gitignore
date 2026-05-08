@@ -46,6 +46,20 @@ lerna-debug.log*
 .temp
 .tmp
 
+# Scratch/debug scripts
+scratch/
+scratch_test.js
+*_fix.js
+*_fix_*.js
+check_*.js
+clean_*.js
+dump_*.js
+fix_*.js
+search_*.js
+test_*.js
+update_*.js
+frontend-dist/
+
 # Runtime data
 pids
 *.pid
