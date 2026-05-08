@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { Prisma } from '@prisma/client';
+import { PushService } from '../push/push.service';
 
 @Injectable()
 export class SpecialOrdersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private push: PushService) {}
 
   async create(body: {
     routeName: string;
@@ -14,7 +15,7 @@ export class SpecialOrdersService {
     targetType: 'specific' | 'all';
     targetDriverIds?: number[];
   }) {
-    return this.prisma.specialOrder.create({
+    const order = await this.prisma.specialOrder.create({
       data: {
         routeName: body.routeName,
         stops: body.stops,
@@ -25,6 +26,35 @@ export class SpecialOrdersService {
         status: 'pending',
       },
     });
+
+    // Send push notifications to target drivers
+    this.sendOrderNotification(order.id, body.routeName, body.targetType, body.targetDriverIds);
+
+    return order;
+  }
+
+  private async sendOrderNotification(
+    orderId: number,
+    routeName: string,
+    targetType: 'specific' | 'all',
+    targetDriverIds?: number[],
+  ) {
+    try {
+      const where =
+        targetType === 'all'
+          ? { driverId: { not: null }, pushToken: { not: null } }
+          : { driverId: { in: targetDriverIds ?? [] }, pushToken: { not: null } };
+
+      const drivers = await this.prisma.user.findMany({ where, select: { pushToken: true } });
+      const tokens = drivers.map((d) => d.pushToken).filter(Boolean) as string[];
+
+      await this.push.sendToMany(
+        tokens,
+        'New Special Order',
+        `A new delivery order is available: ${routeName}`,
+        { orderId },
+      );
+    } catch (_) {}
   }
 
   async findAll() {

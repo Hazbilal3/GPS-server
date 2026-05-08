@@ -25,6 +25,7 @@ model User {
   resetCodeHash      String?
   resetCodeExpiresAt DateTime?
   resetCodeAttempts  Int       @default(0)
+  pushToken          String?
 }
 
 model Upload {

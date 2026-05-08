@@ -30,6 +30,14 @@ export class DriverController {
     return this.driverService.createDriver(dto);
   }
 
+  @Patch(':driverId/push-token')
+  savePushToken(
+    @Param('driverId', ParseIntPipe) driverId: number,
+    @Body() body: { pushToken: string },
+  ) {
+    return this.driverService.savePushToken(driverId, body.pushToken);
+  }
+
   @Patch(':driverId')
   update(
     @Param('driverId', ParseIntPipe) driverId: number,

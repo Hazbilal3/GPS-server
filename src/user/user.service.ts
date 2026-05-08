@@ -148,10 +148,13 @@ export class DriverService {
     };
   }
 
-  /**
-   * Update driver by driverId.
-   * Allows partial updates. Blocks email/phone conflicts.
-   */
+  async savePushToken(driverId: number, pushToken: string) {
+    const driver = await this.prisma.user.findFirst({ where: { driverId } });
+    if (!driver) throw new NotFoundException(`Driver ${driverId} not found`);
+    await this.prisma.user.update({ where: { id: driver.id }, data: { pushToken } });
+    return { message: 'Push token saved' };
+  }
+
   async updateByDriverId(driverId: number, dto: UpdateDriverDto) {
     const driver = await this.prisma.user.findFirst({
       where: { driverId },
