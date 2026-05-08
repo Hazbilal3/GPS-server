@@ -173,3 +173,29 @@ model DisputeMessage {
   dispute       Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
 }
 
+model LeaveRequest {
+  id         Int      @id @default(autoincrement())
+  driverId   Int
+  driverName String
+  date       DateTime
+  reason     String
+  status     String   @default("pending") // "pending" | "approved" | "rejected"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model SpecialOrder {
+  id              Int      @id @default(autoincrement())
+  routeName       String
+  stops           Int
+  date            DateTime
+  price           Float
+  status          String   @default("pending") // "pending" | "accepted"
+  targetType      String   // "specific" | "all"
+  targetDriverIds Json?    // array of driverIds e.g. [12345, 254306]
+  acceptedBy      Int?
+  acceptedByName  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
