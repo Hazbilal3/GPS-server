@@ -31,6 +31,12 @@ model User {
   schedule             String[]
   status               String?   @default("Active")
   driverAvailableToday Boolean?  @default(false)
+  insuranceNumber      String?
+  insuranceExpiry      DateTime?
+  registrationNumber   String?
+  registrationExpiry   DateTime?
+  licenseNumber        String?
+  licenseExpiry        DateTime?
 }
 
 model Upload {

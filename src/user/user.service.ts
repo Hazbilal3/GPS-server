@@ -25,6 +25,12 @@ export class DriverService {
         schedule: true,
         status: true,
         driverAvailableToday: true,
+        insuranceNumber: true,
+        insuranceExpiry: true,
+        registrationNumber: true,
+        registrationExpiry: true,
+        licenseNumber: true,
+        licenseExpiry: true,
       },
     });
   }
@@ -89,6 +95,12 @@ export class DriverService {
       schedule,
       status,
       driverAvailableToday,
+      insuranceNumber,
+      insuranceExpiry,
+      registrationNumber,
+      registrationExpiry,
+      licenseNumber,
+      licenseExpiry,
     } = dto;
 
     if (!driverId) {
@@ -142,6 +154,12 @@ export class DriverService {
         schedule: schedule ?? [],
         status: status ?? 'Active',
         driverAvailableToday: driverAvailableToday ?? false,
+        insuranceNumber: insuranceNumber ?? null,
+        insuranceExpiry: insuranceExpiry ? new Date(insuranceExpiry) : null,
+        registrationNumber: registrationNumber ?? null,
+        registrationExpiry: registrationExpiry ? new Date(registrationExpiry) : null,
+        licenseNumber: licenseNumber ?? null,
+        licenseExpiry: licenseExpiry ? new Date(licenseExpiry) : null,
       },
       select: {
         id: true,
@@ -155,6 +173,12 @@ export class DriverService {
         schedule: true,
         status: true,
         driverAvailableToday: true,
+        insuranceNumber: true,
+        insuranceExpiry: true,
+        registrationNumber: true,
+        registrationExpiry: true,
+        licenseNumber: true,
+        licenseExpiry: true,
       },
     });
 
@@ -223,6 +247,12 @@ export class DriverService {
         schedule: dto.schedule ?? undefined,
         status: dto.status ?? undefined,
         driverAvailableToday: dto.driverAvailableToday ?? undefined,
+        insuranceNumber: dto.insuranceNumber ?? undefined,
+        insuranceExpiry: dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : undefined,
+        registrationNumber: dto.registrationNumber ?? undefined,
+        registrationExpiry: dto.registrationExpiry ? new Date(dto.registrationExpiry) : undefined,
+        licenseNumber: dto.licenseNumber ?? undefined,
+        licenseExpiry: dto.licenseExpiry ? new Date(dto.licenseExpiry) : undefined,
       },
       select: {
         id: true,
@@ -236,6 +266,12 @@ export class DriverService {
         schedule: true,
         status: true,
         driverAvailableToday: true,
+        insuranceNumber: true,
+        insuranceExpiry: true,
+        registrationNumber: true,
+        registrationExpiry: true,
+        licenseNumber: true,
+        licenseExpiry: true,
       },
     });
 

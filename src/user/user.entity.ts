@@ -23,6 +23,12 @@ export class CreateDriverDto {
   schedule?: string[];
   status?: string;
   driverAvailableToday?: boolean;
+  insuranceNumber?: string;
+  insuranceExpiry?: string;
+  registrationNumber?: string;
+  registrationExpiry?: string;
+  licenseNumber?: string;
+  licenseExpiry?: string;
 }
 
 export class UpdateDriverDto {
@@ -38,4 +44,10 @@ export class UpdateDriverDto {
   schedule?: string[];
   status?: string;
   driverAvailableToday?: boolean;
+  insuranceNumber?: string;
+  insuranceExpiry?: string;
+  registrationNumber?: string;
+  registrationExpiry?: string;
+  licenseNumber?: string;
+  licenseExpiry?: string;
 }
