@@ -458,7 +458,10 @@ export class UploadService {
 
     const uploads: UploadRowDto[] = [];
     const skipped: any[] = [];
-    const allAirtableDrivers = await this.prisma.driver.findMany();
+    const allDbDrivers = await this.prisma.user.findMany({
+      where: { driverId: { not: null } },
+      select: { driverId: true, salaryType: true, fixedSalary: true },
+    });
 
     // const createdAtOverride = date ? utcStartOfDay(date) : undefined;
     const createdAtOverride = date ? new Date(`${date}T12:00:00Z`) : undefined;
@@ -554,9 +557,9 @@ const lastEvent = String(row['Last Event'] ?? '')
             status = status ?? 'geocoded';
           }
 
-          const airtableDriver = allAirtableDrivers.find(d => d.OFIDNumber === Number(fkValue));
-          const currentSalaryType = airtableDriver?.salaryType || 'Regular';
-          const currentFixedRate = airtableDriver?.fixedSalary || 0;
+          const dbDriverMatch = allDbDrivers.find(d => d.driverId === Number(fkValue));
+          const currentSalaryType = dbDriverMatch?.salaryType || 'Regular';
+          const currentFixedRate = dbDriverMatch?.fixedSalary || 0;
 
           const saved = await prisma.upload.create({
             data: {
@@ -751,15 +754,18 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
   ) {
     const driverName = driver.fullName;
 
-    // 1. Fetch routes and driver's Airtable info
-    const [airtableRoutes, airtableDriver, existingPayrolls] = await Promise.all([
+    // 1. Fetch routes and driver's salary info from User table
+    const [airtableRoutes, dbDriver, existingPayrolls] = await Promise.all([
       this.getAirtableRoutes(),
-      this.prisma.driver.findFirst({ where: { OFIDNumber: driverId } }),
+      this.prisma.user.findFirst({
+        where: { driverId },
+        select: { salaryType: true, fixedSalary: true },
+      }),
       this.prisma.payroll.findMany({
         where: { driverId },
-        select: { 
-          weekNumber: true, 
-          salaryType: true, 
+        select: {
+          weekNumber: true,
+          salaryType: true,
           zipBreakdown: true,
           totalDeduction: true,
           totalBonus: true,
@@ -768,9 +774,9 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
       }),
     ]);
 
-    if (!airtableDriver) {
+    if (!dbDriver) {
       this.logger.warn(
-        `❌ No Airtable Driver record found for driverId ${driverId} (${driverName}). Skipping payroll.`,
+        `❌ No User record found for driverId ${driverId} (${driverName}). Skipping payroll.`,
       );
       return;
     }
@@ -866,7 +872,7 @@ const driverUploads = await prisma.upload.findMany({
         // --- NEW: Use the salary type CAPTURED on the upload itself ---
         // If multiple uploads on same day have different types (rare), we'll use the most frequent one
         const typesOnDay = dayUploads.map(u => (u.salaryType || '').toLowerCase()).filter(Boolean);
-        let daySalaryType = typesOnDay.length > 0 ? typesOnDay[0] : (airtableDriver.salaryType || 'regular').toLowerCase();
+        let daySalaryType = typesOnDay.length > 0 ? typesOnDay[0] : (dbDriver.salaryType || 'regular').toLowerCase();
 
         // Normalize
         if (daySalaryType.includes('fixed')) daySalaryType = 'fixed rate';
@@ -878,7 +884,7 @@ const driverUploads = await prisma.upload.findMany({
         if (daySalaryType === 'fixed rate') {
           // Use captured rate if available, otherwise current
           const capturedRate = dayUploads.find(u => u.rate > 0)?.rate;
-          const fixedDailyRate = capturedRate || airtableDriver.fixedSalary || 0;
+          const fixedDailyRate = capturedRate || dbDriver.fixedSalary || 0;
           
           const dayAmount = fixedDailyRate; 
           weeklySubtotal += dayAmount;

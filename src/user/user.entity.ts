@@ -11,21 +11,31 @@ export interface User {
 
 // driver.dtos.ts
 export class CreateDriverDto {
-  driverId!: number; // required (non-null)
-  fullName!: string; // required
-  phoneNumber!: string; // required
-  email!: string; // required
-  password!: string; // required
-  userRole?: number; // optional; default set in service (e.g., 2 = driver)
-  adminId?: number | null; // optional
+  driverId!: number;
+  fullName!: string;
+  phoneNumber!: string;
+  email!: string;
+  password!: string;
+  userRole?: number;
+  adminId?: number | null;
+  salaryType?: string;
+  fixedSalary?: number;
+  schedule?: string[];
+  status?: string;
+  driverAvailableToday?: boolean;
 }
 
 export class UpdateDriverDto {
-  driverId?: number | null; // optional; set to null to "unassign" driver role if desired
+  driverId?: number | null;
   fullName?: string;
   phoneNumber?: string;
   email?: string;
-  password?: string; // optional; if provided, will be hashed
+  password?: string;
   userRole?: number;
   adminId?: number | null;
+  salaryType?: string;
+  fixedSalary?: number;
+  schedule?: string[];
+  status?: string;
+  driverAvailableToday?: boolean;
 }

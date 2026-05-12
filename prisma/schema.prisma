@@ -22,10 +22,15 @@ model User {
   uploads            Upload[]
   payrolls           Payroll[]
   disputes           Dispute[]
-  resetCodeHash      String?
-  resetCodeExpiresAt DateTime?
-  resetCodeAttempts  Int       @default(0)
-  pushToken          String?
+  resetCodeHash        String?
+  resetCodeExpiresAt   DateTime?
+  resetCodeAttempts    Int       @default(0)
+  pushToken            String?
+  salaryType           String?
+  fixedSalary          Float?
+  schedule             String[]
+  status               String?   @default("Active")
+  driverAvailableToday Boolean?  @default(false)
 }
 
 model Upload {

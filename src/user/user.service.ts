@@ -14,16 +14,17 @@ export class DriverService {
 
   async getDriversWithId() {
     return this.prisma.user.findMany({
-      where: {
-        driverId: {
-          not: null,
-        },
-      },
+      where: { driverId: { not: null } },
       select: {
         driverId: true,
         fullName: true,
         email: true,
         phoneNumber: true,
+        salaryType: true,
+        fixedSalary: true,
+        schedule: true,
+        status: true,
+        driverAvailableToday: true,
       },
     });
   }
@@ -81,8 +82,13 @@ export class DriverService {
       phoneNumber,
       email,
       password,
-      userRole = 2, // e.g. 2 = Driver; adjust to your roles
+      userRole = 2,
       adminId,
+      salaryType,
+      fixedSalary,
+      schedule,
+      status,
+      driverAvailableToday,
     } = dto;
 
     if (!driverId) {
@@ -129,8 +135,13 @@ export class DriverService {
         fullName,
         phoneNumber,
         email,
-        password: passwordHash, // store hash, not raw password
+        password: passwordHash,
         userRole,
+        salaryType: salaryType ?? null,
+        fixedSalary: fixedSalary ?? null,
+        schedule: schedule ?? [],
+        status: status ?? 'Active',
+        driverAvailableToday: driverAvailableToday ?? false,
       },
       select: {
         id: true,
@@ -139,6 +150,11 @@ export class DriverService {
         phoneNumber: true,
         email: true,
         userRole: true,
+        salaryType: true,
+        fixedSalary: true,
+        schedule: true,
+        status: true,
+        driverAvailableToday: true,
       },
     });
 
@@ -195,16 +211,18 @@ export class DriverService {
     const updated = await this.prisma.user.update({
       where: { id: driver.id },
       data: {
-        // Only set provided fields
         fullName: dto.fullName ?? undefined,
         phoneNumber: dto.phoneNumber ?? undefined,
         email: dto.email ?? undefined,
         userRole: dto.userRole ?? undefined,
         adminId: dto.adminId ?? undefined,
-        // If you want to allow moving driver to a new driverId:
         driverId: dto.driverId ?? undefined,
-        // If you allow "un-assigning" a driver (turn into non-driver), set dto.driverId explicitly to null above
         password: passwordHash ?? undefined,
+        salaryType: dto.salaryType ?? undefined,
+        fixedSalary: dto.fixedSalary ?? undefined,
+        schedule: dto.schedule ?? undefined,
+        status: dto.status ?? undefined,
+        driverAvailableToday: dto.driverAvailableToday ?? undefined,
       },
       select: {
         id: true,
@@ -213,6 +231,11 @@ export class DriverService {
         phoneNumber: true,
         email: true,
         userRole: true,
+        salaryType: true,
+        fixedSalary: true,
+        schedule: true,
+        status: true,
+        driverAvailableToday: true,
       },
     });
 
