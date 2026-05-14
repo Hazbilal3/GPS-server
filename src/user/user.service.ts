@@ -12,6 +12,22 @@ import * as bcrypt from 'bcryptjs';
 export class DriverService {
   constructor(private prisma: PrismaService) {}
 
+  async getDriverById(driverId: number) {
+    return this.prisma.user.findFirst({
+      where: { driverId },
+      select: {
+        driverId: true,
+        fullName: true,
+        email: true,
+        phoneNumber: true,
+        salaryType: true,
+        fixedSalary: true,
+        status: true,
+        schedule: true,
+      },
+    });
+  }
+
   async getDriversWithId() {
     return this.prisma.user.findMany({
       where: { driverId: { not: null } },

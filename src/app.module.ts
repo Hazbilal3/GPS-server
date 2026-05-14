@@ -15,9 +15,10 @@ import { AirtableController } from './airtable/airtable.controller';
 import { DisputeModule } from './dispute/dispute.module';
 import { SpecialOrdersModule } from './special-orders/special-orders.module';
 import { LeaveRequestsModule } from './leave-requests/leave-requests.module';
+import { DriverDocumentsModule } from './driver-documents/driver-documents.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, DisputeModule, SpecialOrdersModule, LeaveRequestsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, DisputeModule, SpecialOrdersModule, LeaveRequestsModule, DriverDocumentsModule],
   controllers: [
     UploadController,
     ReportController,

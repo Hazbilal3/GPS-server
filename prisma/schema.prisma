@@ -97,6 +97,7 @@ model Payroll {
   totalBonus      Float    @default(0)
   netPay          Float
   remarks         String?
+  bonusRemarks    String?
   createdAt       DateTime @default(now())
 
   driver User @relation(fields: [driverId], references: [driverId])
@@ -183,6 +184,17 @@ model DisputeMessage {
   attachmentUrl String?
   createdAt     DateTime @default(now())
   dispute       Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+}
+
+model DriverDocument {
+  id          Int      @id @default(autoincrement())
+  driverId    Int
+  fileName    String
+  storedName  String
+  description String
+  fileUrl     String
+  status      String   @default("pending") // "pending" | "verified"
+  createdAt   DateTime @default(now())
 }
 
 model LeaveRequest {

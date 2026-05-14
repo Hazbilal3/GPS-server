@@ -86,7 +86,7 @@ export class UploadController {
   @Patch('payroll/bonus')
   async updatePayrollBonus(
     @Body()
-    body: { driverId: number; weekNumber: number; totalBonus: number },
+    body: { driverId: number; weekNumber: number; totalBonus: number; bonusRemarks?: string },
   ) {
     return this.uploadService.updatePayrollBonus(body);
   }

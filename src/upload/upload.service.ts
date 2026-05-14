@@ -819,11 +819,18 @@ const driverUploads = await prisma.upload.findMany({
     // --- Helpers ---
     const normalizeZip = (zip?: string): string | null => {
       if (!zip) return null;
-      const match = zip.match(/\d{4,5}/);
-      if (!match) return null;
-      let z = match[0];
-      if (z.length === 4) z = '0' + z;
-      return z;
+      // Address format: "STREET. CITY. STATE. ZIP" — scan from last segment
+      // so street/unit numbers (e.g. "1212", "1411") are never mistaken for zip codes.
+      const parts = zip.split('.').map(p => p.trim()).filter(Boolean);
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const m = parts[i].match(/^(\d{4,5})(?:-\d{4})?$/);
+        if (m) {
+          let z = m[1];
+          if (z.length === 4) z = '0' + z;
+          return z;
+        }
+      }
+      return null;
     };
 
     const extractRouteZips = (route: any): string[] => {
@@ -1040,6 +1047,7 @@ const driverUploads = await prisma.upload.findMany({
         totalBonus: (r as any).totalBonus || 0,
         netPay: r.netPay,
         remarks: (r as any).remarks || '',
+        bonusRemarks: (r as any).bonusRemarks || '',
         zipBreakdown: r.zipBreakdown ?? [], // <-- This line should now work
       })),
     }));
@@ -1067,6 +1075,7 @@ const driverUploads = await prisma.upload.findMany({
         totalBonus: true,
         netPay: true,
         remarks: true,
+        bonusRemarks: true,
         zipBreakdown: true, // <-- Explicitly select zipBreakdown
       },
     });
@@ -1086,6 +1095,7 @@ const driverUploads = await prisma.upload.findMany({
       totalBonus: (record as any).totalBonus || 0,
       netPay: record.netPay,
       remarks: record.remarks,
+      bonusRemarks: (record as any).bonusRemarks || '',
       zipBreakdown: record.zipBreakdown ?? [], // <-- FIX: Return the zipBreakdown
     }));
   }
@@ -1262,10 +1272,12 @@ private async getAirtableDrivers(): Promise<any[]> {
     driverId,
     weekNumber,
     totalBonus,
+    bonusRemarks,
   }: {
     driverId: number;
     weekNumber: number;
     totalBonus: number;
+    bonusRemarks?: string;
   }) {
     const existing = await this.prisma.payroll.findUnique({
       where: { driverId_weekNumber: { driverId, weekNumber } },
@@ -1278,7 +1290,7 @@ private async getAirtableDrivers(): Promise<any[]> {
     const netPay = existing.amount - (existing.totalDeduction || 0) + totalBonus;
     return this.prisma.payroll.update({
       where: { id: existing.id },
-      data: { totalBonus, netPay },
+      data: { totalBonus, netPay, bonusRemarks: bonusRemarks ?? existing['bonusRemarks'] ?? null },
     });
   }
 

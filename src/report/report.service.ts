@@ -16,8 +16,8 @@ export class ReportService {
     let limit = filters.limit ? Number(filters.limit) : 10;
     if (isNaN(limit)) limit = 10;
     if (limit <= 0) limit = 10;
-    if (limit > 100 && !filters.isExport) {
-      limit = 100;
+    if (limit > 1000 && !filters.isExport) {
+      limit = 1000;
     }
     const skip = (page - 1) * limit;
     const whereClause = this.buildWhereClause(filters);
