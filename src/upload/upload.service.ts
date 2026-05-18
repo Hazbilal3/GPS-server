@@ -891,15 +891,15 @@ const driverUploads = await prisma.upload.findMany({
         if (daySalaryType === 'fixed rate') {
           // Use captured rate if available, otherwise current
           const capturedRate = dayUploads.find(u => u.rate > 0)?.rate;
-          const fixedDailyRate = capturedRate || dbDriver.fixedSalary || 0;
-          
-          const dayAmount = fixedDailyRate; 
+          const fixedRatePerStop = capturedRate || dbDriver.fixedSalary || 0;
+          const deliveredStops = dayUploads.length; // already filtered to delivered
+          const dayAmount = Number((fixedRatePerStop * deliveredStops).toFixed(2));
           weeklySubtotal += dayAmount;
           zipBreakdown.push({
             zip: 'N/A',
             date: dateKey,
-            stops: dayUploads.length,
-            rate: fixedDailyRate,
+            stops: deliveredStops,
+            rate: fixedRatePerStop,
             amount: dayAmount,
             salaryType: 'Fixed Rate'
           });
