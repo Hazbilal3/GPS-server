@@ -103,26 +103,25 @@ export class ReportService {
       }
       const fields = [
         { label: 'ID', value: 'id' },
-        { label: 'Barcode', value: 'barcode' },
+        { label: 'Name', value: 'barcode' },
+        { label: 'Pieces', value: 'pieces' },
+        { label: 'Sequence', value: 'sequenceNo' },
+        { label: 'City', value: 'city' },
+        { label: 'Zip', value: 'zipCode' },
         { label: 'Address', value: 'address' },
-        { label: 'Status', value: 'status' },
+        { label: 'Delivery Status', value: 'lastevent' },
         {
           label: 'Created At',
-          value: (row) => row.createdAt.toISOString(),
+          value: (row: any) => row.createdAt.toISOString(),
         },
         {
           label: 'Driver Name',
-          value: (row) => row.user?.fullName.trim(),
+          value: (row: any) => row.user?.fullName?.trim() || '',
         },
         {
           label: 'Driver Email',
-          value: (row) => row.user?.email || '',
+          value: (row: any) => row.user?.email || '',
         },
-        { label: 'GPS Location', value: 'gpsLocation' },
-        { label: 'Expected Latitude', value: 'expectedLat' },
-        { label: 'Expected Longitude', value: 'expectedLng' },
-        { label: 'Distance (km)', value: 'distanceKm' },
-        { label: 'Google Maps Link', value: 'googleMapsLink' },
       ];
       const csv = parse(allData.slice(0, this.MAX_EXPORT_LIMIT), { fields });
       res.header('Content-Type', 'text/csv');

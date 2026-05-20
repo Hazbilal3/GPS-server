@@ -40,25 +40,24 @@ model User {
 }
 
 model Upload {
-  id             Int      @id @default(autoincrement())
-  driverId       Int? // Should match User.driverId type
-  user           User?    @relation(fields: [driverId], references: [driverId])
-  barcode        String
-  sequenceNo     String?
-  lastevent      String?
-  lasteventdata  String?
-  address        String
-  gpsLocation    String?
-  expectedLat    Float?
-  expectedLng    Float?
-  distanceKm     Float?
-  status         String?
-  googleMapsLink String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  salaryType     String?  // Capture type at time of upload
-  rate           Float?   // Capture rate if applicable
-  exports        Export[]
+  id         Int      @id @default(autoincrement())
+  driverId   Int?
+  user       User?    @relation(fields: [driverId], references: [driverId])
+  barcode    String
+  sequenceNo String?
+  lastevent  String?
+  address    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  salaryType String?
+  rate       Float?
+  pieces     Int?
+  zipCode    String?
+  city       String?
+  exports    Export[]
+
+  @@index([driverId, createdAt])
+  @@index([driverId, lastevent])
 }
 
 model Export {
@@ -103,6 +102,7 @@ model Payroll {
   driver User @relation(fields: [driverId], references: [driverId])
 
   @@unique([driverId, weekNumber])
+  @@index([weekNumber])
 }
 
 model Route {
@@ -124,44 +124,6 @@ model Route {
   updatedAt                 DateTime @updatedAt
 }
 
-model AirtablePayroll {
-  id                  Int       @id @default(autoincrement())
-  driverId            Int?
-  payrollGeneratedOn  DateTime?
-  payPeriod           String?
-  directDepositDate   DateTime?
-  weekNumber          Int?
-  driver              String?
-  stops               String?
-  totalFromStops      Float?
-  totalBonus          Float?
-  totalDeductions     Float?
-  netPay              Float?
-  driverName          String?
-  payrollSummary      String?
-  totalStopsCompleted Int?
-  salaryType          String?
-  subtotal            Float?
-  created             DateTime?
-}
-
-model Driver {
-  id                   Int      @id @default(autoincrement())
-  fullName             String
-  firstName            String
-  lastName             String
-  Status               String
-  phoneNumber          String
-  email                String   @unique
-  OFIDNumber           Int?
-  salaryType           String
-  fixedSalary          Float?
-  schedule             String[]
-  dayoftheweek         String?
-  driverAvailableToday Boolean?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-}
 
 model Dispute {
   id         Int              @id @default(autoincrement())
@@ -173,6 +135,8 @@ model Dispute {
   updatedAt  DateTime         @updatedAt
   messages   DisputeMessage[]
   driver     User             @relation(fields: [driverId], references: [driverId])
+
+  @@index([driverId])
 }
 
 model DisputeMessage {
@@ -206,6 +170,9 @@ model LeaveRequest {
   status     String   @default("pending") // "pending" | "approved" | "rejected"
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@index([driverId])
+  @@index([status])
 }
 
 model SpecialOrder {

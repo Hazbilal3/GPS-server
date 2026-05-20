@@ -1,12 +1,11 @@
 export interface UploadRowDto {
   barcode: string;
   address: string;
-  gpsLocation?: string | null;
-  expectedLat?: number | null;
-  expectedLng?: number | null;
-  distanceKm?: number | null;
-  status?: string | null;
-  googleMapsLink?: string | null;
+  sequenceNo?: string;
+  lastevent?: string;
+  pieces?: number;
+  zipCode?: string;
+  city?: string;
 }
 
 export interface UploadFileDto {

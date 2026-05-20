@@ -10,13 +10,17 @@ import {
   UseInterceptors,
   UploadedFile,
   Res,
+  UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { DriverDocumentsService } from './driver-documents.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { extname, basename, resolve, join } from 'path';
 import type { Response } from 'express';
 import * as fs from 'fs';
+import { AuthGuard } from '../auth/auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 
 const uploadDir = './uploads/driver-documents';
 if (!fs.existsSync(uploadDir)) {
@@ -36,16 +40,23 @@ export class DriverDocumentsController {
   constructor(private service: DriverDocumentsService) {}
 
   @Get('file/:filename')
+  @UseGuards(AuthGuard)
   serveFile(@Param('filename') filename: string, @Res() res: Response) {
-    return res.sendFile(filename, { root: './uploads/driver-documents' });
+    const safeName = basename(filename);
+    const root = resolve(uploadDir);
+    const fullPath = join(root, safeName);
+    if (!fullPath.startsWith(root)) throw new ForbiddenException();
+    return res.sendFile(fullPath);
   }
 
   @Get(':driverId')
+  @UseGuards(AuthGuard)
   getDocuments(@Param('driverId', ParseIntPipe) driverId: number) {
     return this.service.getDocuments(driverId);
   }
 
   @Post(':driverId')
+  @UseGuards(AuthGuard)
   @UseInterceptors(FileInterceptor('file', { storage: docStorage }))
   uploadDocument(
     @Param('driverId', ParseIntPipe) driverId: number,
@@ -56,11 +67,13 @@ export class DriverDocumentsController {
   }
 
   @Delete(':id')
+  @UseGuards(AuthGuard, AdminGuard)
   deleteDocument(@Param('id', ParseIntPipe) id: number) {
     return this.service.deleteDocument(id);
   }
 
   @Patch(':id/approve')
+  @UseGuards(AuthGuard, AdminGuard)
   approveDocument(@Param('id', ParseIntPipe) id: number) {
     return this.service.approveDocument(id);
   }

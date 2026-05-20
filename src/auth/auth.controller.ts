@@ -1,5 +1,5 @@
-// auth/auth.controller.ts
 import { Controller, Post, Body } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from 'src/user/dto/register.dto';
 import { LoginDto } from 'src/user/dto/login.dto';
@@ -17,6 +17,7 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
+  @Throttle({ default: { limit: 5, ttl: 900000 } })
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
@@ -27,19 +28,18 @@ export class AuthController {
     return this.authService.lookupIdentifier(dto);
   }
 
-  // STEP 2: send OTP to that user's email
+  @Throttle({ default: { limit: 5, ttl: 900000 } })
   @Post('forgot-send-code')
   sendCode(@Body() dto: SendResetCodeDto) {
     return this.authService.sendResetCode(dto);
   }
 
-  // STEP 3: verify OTP
+  @Throttle({ default: { limit: 5, ttl: 900000 } })
   @Post('forgot-verify-code')
   verify(@Body() dto: VerifyResetCodeDto) {
     return this.authService.verifyResetCode(dto);
   }
 
-  // STEP 4: reset password
   @Post('forgot-reset')
   reset(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);

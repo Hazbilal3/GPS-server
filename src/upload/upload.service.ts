@@ -9,290 +9,9 @@ import {
   Logger,
 } from '@nestjs/common';
 import * as XLSX from 'xlsx';
-import { Readable } from 'stream';
-import axios from 'axios';
-import haversineDistance from 'haversine-distance';
 import { PrismaService } from 'src/prisma.service';
-import { UploadRowDto } from './dto/upload.dto';
-// Import Prisma types for transactions
 import { Prisma, User } from '@prisma/client';
 
-// ... (All helper functions from parseLatLngSpaceSeparated to getWeekDateRange are unchanged) ...
-function parseLatLngSpaceSeparated(input: string) {
-  const parts = input.trim().split(/\s+/);
-  if (parts.length < 2) {
-    throw new Error(`Invalid gpsLocation format: ${input}`);
-  }
-  const lat = Number(parts[0]);
-  const lng = Number(parts[1]);
-  if (Number.isNaN(lat) || Number.isNaN(lng)) {
-    throw new Error(`Invalid numeric values in gpsLocation: ${input}`);
-  }
-  return { lat, lng };
-}
-
-const US_STATE_ABBR = new Set([
-  'AL',
-  'AK',
-  'AZ',
-  'AR',
-  'CA',
-  'CO',
-  'CT',
-  'DC',
-  'DE',
-  'FL',
-  'GA',
-  'HI',
-  'IA',
-  'ID',
-  'IL',
-  'IN',
-  'KS',
-  'KY',
-  'LA',
-  'MA',
-  'MD',
-  'ME',
-  'MI',
-  'MN',
-  'MO',
-  'MS',
-  'MT',
-  'NC',
-  'ND',
-  'NE',
-  'NH',
-  'NJ',
-  'NM',
-  'NV',
-  'NY',
-  'OH',
-  'OK',
-  'OR',
-  'PA',
-  'RI',
-  'SC',
-  'SD',
-  'TN',
-  'TX',
-  'UT',
-  'VA',
-  'VT',
-  'WA',
-  'WI',
-  'WV',
-  'WY',
-  'PR',
-  'GU',
-  'VI',
-  'AS',
-  'MP',
-  'UM',
-]);
-
-function normalizeAddress(raw: string) {
-  if (!raw)
-    return {
-      cleaned: '',
-      zip: null as string | null,
-      state: null as string | null,
-      city: null as string | null,
-    };
-
-  let a = String(raw);
-
-  a = a.replace(/\bLOCATION[-\s]*[\w-]+\b/gi, ' ');
-
-  a = a
-    .replace(/[.]/g, ' ')
-    .replace(/\s*,\s*/g, ', ')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-
-  const zipMatch = a.match(/\b\d{5}(?:-\d{4})?\b/);
-  const zip = zipMatch ? zipMatch[0] : null;
-
-  const stateMatch = a.match(/\b[A-Z]{2}\b/g);
-  const state = stateMatch
-    ? (stateMatch.find((s) => US_STATE_ABBR.has(s.toUpperCase())) ?? null)
-    : null;
-
-  let city: string | null = null;
-  if (state) {
-    const cityRe = new RegExp(
-      `,\\s*([A-Za-z][A-Za-z\\s.'-]+)\\s*,\\s*${state}\\b`,
-    );
-    const m = a.match(cityRe);
-    if (m && m[1]) city = m[1].trim();
-  } else {
-    const m = a.match(/,\s*([A-Za-z][A-Za-z\s.'-]+)\s*$/);
-    if (m && m[1]) city = m[1].trim();
-  }
-
-  if (state) a = a.replace(new RegExp(`\\s${state}\\b`), `, ${state}`);
-  if (zip) a = a.replace(new RegExp(`\\s*${zip}\\b`), ` ${zip}`);
-
-  a = a.replace(/,\s*,/g, ', ').trim();
-
-  return { cleaned: a, zip, state, city };
-}
-
-function componentsFilter(zip?: string | null, state?: string | null) {
-  const parts = ['country:US'];
-  if (zip) parts.push(`postal_code:${zip}`);
-  if (state) parts.push(`administrative_area:${state}`);
-  return parts.join('|');
-}
-
-function pickBestGeocodeResult(
-  results: any[],
-  zip?: string | null,
-  state?: string | null,
-  city?: string | null,
-) {
-  if (!Array.isArray(results) || results.length === 0) return null;
-
-  const hasZip = (r: any) => zip && r.formatted_address?.includes(zip);
-  const hasState = (r: any) =>
-    state && new RegExp(`\\b${state}\\b`).test(r.formatted_address || '');
-  const hasCity = (r: any) =>
-    city &&
-    new RegExp(
-      `\\b${city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
-      'i',
-    ).test(r.formatted_address || '');
-  const isStreety = (r: any) =>
-    (r.types || []).includes('street_address') ||
-    (r.types || []).includes('premise');
-
-  const scored = results.map((r: any) => {
-    let score = 0;
-    if (hasZip(r)) score += 100;
-    if (hasState(r)) score += 50;
-    if (hasCity(r)) score += 40;
-    if (isStreety(r)) score += 25;
-    score += Math.max(0, 20 - (r.formatted_address?.length || 0) / 10);
-    return { r, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  return scored[0].r;
-}
-
-type SmartGeo = {
-  lat: number;
-  lng: number;
-  formattedAddress: string;
-  partialMatch: boolean;
-  source: 'geocode' | 'places_find' | 'places_text';
-};
-
-async function geocodeSmart(
-  addressRaw: string,
-  opts?: { gpsBias?: { lat: number; lng: number } },
-): Promise<SmartGeo | null> {
-  const key = process.env.GOOGLE_MAPS_API_KEY;
-  if (!key) throw new Error('Missing GOOGLE_MAPS_API_KEY');
-
-  const { cleaned, zip, state, city } = normalizeAddress(addressRaw);
-  const allowGpsBias = !zip && !state && !!opts?.gpsBias;
-
-  try {
-    const gcParams: any = { address: cleaned, key, region: 'us' };
-    const comp = componentsFilter(zip, state);
-    if (comp) gcParams.components = comp;
-
-    const geoRes = await axios.get(
-      'https://maps.googleapis.com/maps/api/geocode/json',
-      {
-        params: gcParams,
-      },
-    );
-
-    const { results, status } = geoRes.data || {};
-    if (status === 'OK' && results?.length) {
-      const best =
-        pickBestGeocodeResult(results, zip, state, city) || results[0];
-      return {
-        lat: best.geometry.location.lat,
-        lng: best.geometry.location.lng,
-        formattedAddress: best.formatted_address,
-        partialMatch: Boolean(best.partial_match),
-        source: 'geocode',
-      };
-    }
-  } catch {}
-
-  try {
-    const findParams: any = {
-      input: cleaned,
-      inputtype: 'textquery',
-      fields: 'geometry,formatted_address,place_id',
-      region: 'us',
-      key,
-    };
-    if (allowGpsBias) {
-      const { lat, lng } = opts!.gpsBias!;
-      findParams.locationbias = `circle:50000@${lat},${lng}`;
-    }
-    const findRes = await axios.get(
-      'https://maps.googleapis.com/maps/api/place/findplacefromtext/json',
-      { params: findParams },
-    );
-    const cand = findRes.data?.candidates || [];
-    if (cand.length) {
-      const best = cand[0];
-      return {
-        lat: best.geometry.location.lat,
-        lng: best.geometry.location.lng,
-        formattedAddress: best.formatted_address,
-        partialMatch: false,
-        source: 'places_find',
-      };
-    }
-  } catch {}
-
-  try {
-    const txtParams: any = {
-      query: cleaned + (zip ? ` ${zip}` : '') + (state ? ` ${state}` : ''),
-      region: 'us',
-      key,
-    };
-    if (allowGpsBias) {
-      const { lat, lng } = opts!.gpsBias!;
-      txtParams.location = `${lat},${lng}`;
-      txtParams.radius = 50000; // 50km bias
-    }
-    const txtRes = await axios.get(
-      'https://maps.googleapis.com/maps/api/place/textsearch/json',
-      { params: txtParams },
-    );
-    const results = txtRes.data?.results || [];
-    if (results.length) {
-      const r = results[0];
-      return {
-        lat: r.geometry.location.lat,
-        lng: r.geometry.location.lng,
-        formattedAddress: r.formatted_address,
-        partialMatch: false,
-        source: 'places_text',
-      };
-    }
-  } catch {}
-
-  return null;
-}
-
-function utcStartOfDay(yyyyMmDd: string) {
-  return new Date(`${yyyyMmDd}T00:00:00.000Z`);
-}
-
-function zipFilter(address: string): string | null {
-  if (!address) return null;
-  const match = address.match(/\b\d{5}(?:-\d{4})?\b/);
-  return match ? match[0] : null;
-}
 
 // [NEW HELPER]
 // This is the standard ISO week calculation. We need it for our new functions.
@@ -405,21 +124,6 @@ export interface PayrollRecord {
 }
 // ----------------------------------------
 
-function getPaycheckDate(weekNumber) {
-  // Calculate paycheck date based on week number (example: Friday of that week)
-  const year = new Date().getFullYear();
-  const firstDayOfYear = new Date(year, 0, 1);
-  const daysOffset = (weekNumber - 1) * 7;
-  const weekStart = new Date(
-    firstDayOfYear.getTime() + daysOffset * 24 * 60 * 60 * 1000,
-  );
-
-  // Set to Friday (5th day of the week)
-  const paycheckDate = new Date(weekStart);
-  paycheckDate.setDate(weekStart.getDate() + (5 - weekStart.getDay()));
-
-  return paycheckDate.toISOString().split('T')[0]; // e.g. "2025-07-04"
-}
 
 function getUtcDayBounds(yyyyMmDd: string) {
   const start = new Date(`${yyyyMmDd}T00:00:00.000Z`);
@@ -433,12 +137,11 @@ function getUtcDayBounds(yyyyMmDd: string) {
 
 @Injectable()
 export class UploadService {
-  // Add a logger for better debugging
   private readonly logger = new Logger(UploadService.name);
+  private routeCache: { data: any[]; expiresAt: number } | null = null;
+  private readonly ROUTE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-  constructor(
-    private prisma: PrismaService, // Note: AirtableService is no longer needed here
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async processExcel(
     file: Express.Multer.File,
@@ -456,155 +159,64 @@ export class UploadService {
     const worksheet = workbook.Sheets[sheetName];
     const sheet = XLSX.utils.sheet_to_json(worksheet);
 
-    const uploads: UploadRowDto[] = [];
-    const skipped: any[] = [];
-    const allDbDrivers = await this.prisma.user.findMany({
-      where: { driverId: { not: null } },
-      select: { driverId: true, salaryType: true, fixedSalary: true },
-    });
+    // Validate new format — must have Name and Pieces columns
+    const firstRow = (sheet as any[])[0] ?? {};
+    if (!('Name' in firstRow) || !('Pieces' in firstRow)) {
+      throw new BadRequestException(
+        'Invalid file format. Upload the new manifest format with columns: Name, Status, Pieces, Sequence, City, Zip, Address.',
+      );
+    }
 
-    // const createdAtOverride = date ? utcStartOfDay(date) : undefined;
     const createdAtOverride = date ? new Date(`${date}T12:00:00Z`) : undefined;
+    const dbDriverMatch = await this.prisma.user.findFirst({
+      where: { driverId },
+      select: { salaryType: true, fixedSalary: true },
+    });
+    const currentSalaryType = dbDriverMatch?.salaryType || 'Regular';
+    const currentFixedRate = dbDriverMatch?.fixedSalary || 0;
 
+    const uploads: any[] = [];
 
     const transactionResult = await this.prisma.$transaction(
       async (prisma) => {
         for (const row of sheet as any[]) {
-          let barcodeVal = row['Barcode'];
-          if (typeof barcodeVal === 'number') {
-            barcodeVal = barcodeVal.toFixed(0);
-          }
-          const barcode = String(barcodeVal).trim();
-
-          const existing = await prisma.upload.findFirst({
-            where: { driverId: fkValue, barcode },
-          });
-
-          if (existing) {
-            skipped.push(barcode);
-            continue;
-          }
-
-          const addressRaw = String(row['Address'] ?? '');
-          const gpsLocation = String(row['Last GPS location'] ?? '');
-          const sequenceNo = String(row['Seq No'] ?? '');
-const lastEvent = String(row['Last Event'] ?? '')
-  .replace(/\s+/g, ' ')  // collapse multiple spaces
-  .trim()
-  .toLowerCase();
-            const lastEventTime = String(row['Last Event time'] ?? '');
-          let expectedLat: number | null = null;
-          let expectedLng: number | null = null;
-          let distanceKm: number | null = null;
-          let status: string | null = null;
-          let googleMapsLink: string | null = null;
-
-          let gpsForBias: { lat: number; lng: number } | null = null;
-          if (gpsLocation && gpsLocation.trim()) {
-            try {
-              gpsForBias = parseLatLngSpaceSeparated(gpsLocation);
-            } catch {
-              gpsForBias = null;
-            }
-          }
-
-          // ── GEOCODING DISABLED ─────────────────────────────────────────────
-          // Google Maps API calls commented out to prevent billing.
-          // To re-enable: uncomment the block below and remove the status assignment.
-          // if (addressRaw && addressRaw.trim().length > 0) {
-          //   try {
-          //     const geo = await geocodeSmart(addressRaw, {
-          //       gpsBias: gpsForBias || undefined,
-          //     });
-          //     if (geo) {
-          //       expectedLat = geo.lat;
-          //       expectedLng = geo.lng;
-          //       status = geo.partialMatch ? 'partial_match' : 'geocoded';
-          //     } else {
-          //       status = 'geocode_zero_results';
-          //     }
-          //   } catch {
-          //     status = 'geocode_error';
-          //     expectedLat = null;
-          //     expectedLng = null;
-          //   }
-          // } else {
-          //   status = 'no_address';
-          // }
-          // ── Set status without API call ────────────────────────────────────
-          if (addressRaw && addressRaw.trim().length > 0) {
-            status = 'geocode_disabled';
-          } else {
-            status = 'no_address';
-          }
-          expectedLat = null;
-          expectedLng = null;
-          // ───────────────────────────────────────────────────────────────────
-
-          if (gpsForBias && expectedLat != null && expectedLng != null) {
-            try {
-              const start = { lat: gpsForBias.lat, lon: gpsForBias.lng };
-              const end = { lat: Number(expectedLat), lon: Number(expectedLng) };
-
-              distanceKm = haversineDistance(start, end);
-             status = distanceKm > 15 ? 'mismatch' : 'match';
-
-              googleMapsLink = `https://www.google.com/maps/dir/?api=1&origin=${start.lat},${start.lon}&destination=${end.lat},${end.lon}`;
-            } catch {
-              if (!status) status = 'gps_parse_error';
-            }
-          } else if (!gpsLocation && expectedLat != null && expectedLng != null) {
-            status = status ?? 'geocoded';
-          }
-
-          const dbDriverMatch = allDbDrivers.find(d => d.driverId === Number(fkValue));
-          const currentSalaryType = dbDriverMatch?.salaryType || 'Regular';
-          const currentFixedRate = dbDriverMatch?.fixedSalary || 0;
+          const recipientName = String(row['Name'] ?? '').trim();
+          const statusNum = Number(row['Status'] ?? 0);
+          const lastEvent = statusNum === 3 ? 'delivered' : `status_${statusNum}`;
+          const pieces = Number(row['Pieces'] ?? 1) || 1;
+          const sequenceNo = String(row['Sequence'] ?? '');
+          const rawZip = String(row['Zip'] ?? '');
+          const zipCode = rawZip.split('-')[0].trim();
+          const city = String(row['City'] ?? '').trim();
+          const addressRaw = String(row['Address'] ?? '').trim();
 
           const saved = await prisma.upload.create({
             data: {
               driverId: fkValue,
-              barcode,
+              barcode: recipientName,
               sequenceNo,
               lastevent: lastEvent,
-              lasteventdata: lastEventTime,
               address: addressRaw,
-              gpsLocation,
-              expectedLat,
-              expectedLng,
-              distanceKm,
-              status,
-              googleMapsLink,
+              pieces,
+              zipCode,
+              city,
               salaryType: currentSalaryType,
               rate: currentSalaryType.toLowerCase().includes('fixed') ? currentFixedRate : null,
               createdAt: createdAtOverride || new Date(),
             },
           });
-
-          uploads.push(saved as any);
+          uploads.push(saved);
         }
 
-        // --- NEW: Calculate and save payroll within the transaction ---
         if (uploads.length > 0) {
-          this.logger.log(
-            `Uploads saved for driver ${driverId}. Recalculating payroll...`,
-          );
+          this.logger.log(`Uploads saved for driver ${driverId}. Recalculating payroll...`);
           const uploadDate = createdAtOverride || new Date();
           await this.calculateAndSavePayrollForDriver(driverId, user, prisma, uploadDate);
-        } else {
-        this.logger.log(
-            `No new uploads for driver ${driverId}. Skipping payroll calculation.`,
-          );
         }
 
         return {
-          message:
-            skipped.length > 0
-              ? `Some data already exists — skipped ${skipped.length} entries`
-              : 'Upload successful',
+          message: 'Upload successful',
           uploadedCount: uploads.length,
-          skippedCount: skipped.length,
-          skippedBarcodes: skipped,
         };
       },
       { maxWait: 500000, timeout: 500000 },
@@ -782,7 +394,6 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
     }
 
     // 2. Fetch uploads for this driver
-// In calculateAndSavePayrollForDriver
 const driverUploads = await prisma.upload.findMany({
   where: {
     driverId,
@@ -791,7 +402,7 @@ const driverUploads = await prisma.upload.findMany({
       mode: 'insensitive',
     },
   },
-  select: { address: true, createdAt: true, salaryType: true, rate: true },
+  select: { address: true, createdAt: true, salaryType: true, rate: true, pieces: true, zipCode: true },
 });
 
 
@@ -841,10 +452,18 @@ const driverUploads = await prisma.upload.findMany({
       return raw.map((z) => normalizeZip(String(z))).filter(Boolean) as string[];
     };
 
+    // Build zip→route index once (O(routes×zips)) instead of scanning on every zip lookup
+    const zipToRoute = new Map<string, any>();
+    for (const route of airtableRoutes) {
+      for (const zip of extractRouteZips(route)) {
+        if (!zipToRoute.has(zip)) zipToRoute.set(zip, route);
+      }
+    }
+
     // 4. Loop through each week and calculate
     for (const [weekNumberStr, weekUploads] of Object.entries(uploadsByWeek)) {
       const weekNumber = Number(weekNumberStr);
-      const totalStops = weekUploads.length;
+      const totalStops = weekUploads.reduce((sum, u) => sum + (u.pieces ?? 1), 0);
 
       // When called from a specific upload event, only recalculate the affected week.
       // All other weeks already have correct payroll — skip them to prevent
@@ -870,10 +489,6 @@ const driverUploads = await prisma.upload.findMany({
       const zipBreakdown: any[] = [];
       const usedSalaryTypes = new Set<string>();
 
-      // Check if existing record is legacy (no dates in breakdown)
-      const isLegacy = existingBreakdown.length > 0 && !existingBreakdown.some(b => b.date);
-      const legacyWeeklyType = isLegacy ? (existing?.salaryType || 'regular').toLowerCase() : '';
-
       // Iterate through each day in the week
       for (const [dateKey, dayUploads] of Object.entries(weekUploadsByDay)) {
         // --- NEW: Use the salary type CAPTURED on the upload itself ---
@@ -892,7 +507,7 @@ const driverUploads = await prisma.upload.findMany({
           // Use captured rate if available, otherwise current
           const capturedRate = dayUploads.find(u => u.rate > 0)?.rate;
           const fixedRatePerStop = capturedRate || dbDriver.fixedSalary || 0;
-          const deliveredStops = dayUploads.length; // already filtered to delivered
+          const deliveredStops = dayUploads.reduce((sum, u) => sum + (u.pieces ?? 1), 0);
           const dayAmount = Number((fixedRatePerStop * deliveredStops).toFixed(2));
           weeklySubtotal += dayAmount;
           zipBreakdown.push({
@@ -907,12 +522,12 @@ const driverUploads = await prisma.upload.findMany({
           // Regular logic for this day
           const dayZips: Record<string, number> = {};
           for (const upload of dayUploads) {
-            const zip = normalizeZip(upload.address);
-            if (zip) dayZips[zip] = (dayZips[zip] || 0) + 1;
+            const zip = upload.zipCode || normalizeZip(upload.address);
+            if (zip) dayZips[zip] = (dayZips[zip] || 0) + (upload.pieces ?? 1);
           }
 
           for (const [zip, stopCount] of Object.entries(dayZips)) {
-            const route = airtableRoutes.find(r => extractRouteZips(r).includes(zip));
+            const route = zipToRoute.get(zip);
             // For existing records: always prefer the stored historical rate.
             // This prevents route rate changes or deletions from rewriting past payroll.
             const hist = existingBreakdown.find(b => b.zip === zip && b.rate > 0);
@@ -1228,27 +843,16 @@ const driverUploads = await prisma.upload.findMany({
         (a.driverName || '').localeCompare(b.driverName || ''),
     );
   }
-  /**
-   * REPLACED: This now fetches from our local DB, not Airtable.
-   */
   async getAirtableRoutes(): Promise<any[]> {
+    const now = Date.now();
+    if (this.routeCache && now < this.routeCache.expiresAt) {
+      return this.routeCache.data;
+    }
     const routes = await this.prisma.route.findMany();
+    this.routeCache = { data: routes, expiresAt: now + this.ROUTE_CACHE_TTL_MS };
     return routes;
   }
 
-  /**
-   * DEPRECATED: This function is no longer used by the payroll service.
-   * It was replaced by fetching from prisma.driver.
-   */
-private async getAirtableDrivers(): Promise<any[]> {
-    // This function is no longer called by the new payroll logic.
-    // It is kept here only for reference if other parts of the app use it.
-    // The new logic uses `this.prisma.driver.findFirst(...)`
-    this.logger.warn(
-      'getAirtableDrivers() is deprecated for payroll calculation.',
-    );
-    return [];
-  }
 
   async updateRoute(
     id: number,
@@ -1264,6 +868,7 @@ private async getAirtableDrivers(): Promise<any[]> {
     if (data.ratePerStopCompanyVehicle !== undefined) updateData.ratePerStopCompanyVehicle = Number(data.ratePerStopCompanyVehicle);
     if (data.baseRate !== undefined) updateData.baseRate = Number(data.baseRate);
     if (data.baseRateCompanyVehicle !== undefined) updateData.baseRateCompanyVehicle = Number(data.baseRateCompanyVehicle);
+    this.routeCache = null;
     const updated = await this.prisma.route.update({ where: { id }, data: updateData });
     this.logger.log('Route ' + id + ' rates updated. Future payroll will use new rates.');
     return updated;
@@ -1306,6 +911,7 @@ private async getAirtableDrivers(): Promise<any[]> {
     zipCode?: string[];
     schedule?: string[];
   }) {
+    this.routeCache = null;
     return this.prisma.route.create({
       data: {
         routeNumber: data.routeNumber || null,
@@ -1322,6 +928,7 @@ private async getAirtableDrivers(): Promise<any[]> {
   }
 
   async deleteRoute(id: number) {
+    this.routeCache = null;
     const deleted = await this.prisma.route.delete({ where: { id } });
     this.logger.log('Route ' + id + ' deleted.');
     return deleted;

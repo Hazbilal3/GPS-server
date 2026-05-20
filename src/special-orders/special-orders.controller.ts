@@ -7,15 +7,18 @@ import {
   Body,
   Param,
   ParseIntPipe,
+  UseGuards,
 } from '@nestjs/common';
 import { SpecialOrdersService } from './special-orders.service';
+import { AuthGuard } from '../auth/auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 
 @Controller('special-orders')
 export class SpecialOrdersController {
   constructor(private service: SpecialOrdersService) {}
 
-  // Admin: create order
   @Post()
+  @UseGuards(AuthGuard, AdminGuard)
   create(
     @Body()
     body: {
@@ -30,20 +33,20 @@ export class SpecialOrdersController {
     return this.service.create(body);
   }
 
-  // Admin: get all orders
   @Get()
+  @UseGuards(AuthGuard)
   findAll() {
     return this.service.findAll();
   }
 
-  // Driver: get available orders
   @Get('driver/:driverId')
+  @UseGuards(AuthGuard)
   findForDriver(@Param('driverId', ParseIntPipe) driverId: number) {
     return this.service.findForDriver(driverId);
   }
 
-  // Driver: accept order
   @Patch(':id/accept')
+  @UseGuards(AuthGuard)
   accept(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: { driverId: number; driverName: string },
@@ -51,8 +54,8 @@ export class SpecialOrdersController {
     return this.service.accept(id, body.driverId, body.driverName);
   }
 
-  // Admin: delete order
   @Delete(':id')
+  @UseGuards(AuthGuard, AdminGuard)
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.service.remove(id);
   }

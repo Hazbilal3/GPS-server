@@ -1,11 +1,12 @@
-// auth/auth.controller.ts
-import { Controller, Get, Post,Put, Delete, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { AirtableService } from './airtable.service';
 import { CreateDriverDto } from './dto/create-driver.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
-
+import { AuthGuard } from '../auth/auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 
 @Controller('airtable')
+@UseGuards(AuthGuard, AdminGuard)
 export class AirtableController {
   constructor(private airtableService: AirtableService) {}
 
@@ -48,13 +49,14 @@ export class AirtableController {
 
   @Get('drivers-data')
   async fetchAndSaveRoutes() {
-  return await this.airtableService.getDrivers();
+    return await this.airtableService.getDrivers();
   }
 
   @Get('payroll-data')
   async fetchAndSaveCustomRoutes() {
     return await this.airtableService.getPayrolls();
   }
+
   @Post('add-driver')
   async addDriver(@Body() driverData: CreateDriverDto) {
     const result = await this.airtableService.addDriver(driverData);
@@ -73,4 +75,3 @@ export class AirtableController {
     return { message: 'Driver deleted successfully', data: result };
   }
 }
-

@@ -1,13 +1,16 @@
-import { Controller, Get, Query, Res } from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { ReportService } from './report.service';
 import { ReportFilterDto } from './dto/report.dto';
 import express from 'express';
 import { ApiQuery, ApiResponse } from '@nestjs/swagger';
+import { AuthGuard } from '../auth/auth.guard';
+
 @Controller('report')
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
   @Get()
+  @UseGuards(AuthGuard)
   @ApiQuery({ name: 'driverId', required: false, type: Number })
   @ApiQuery({ name: 'date', required: false, type: String })
   @ApiQuery({ name: 'startDate', required: false, type: String })
@@ -17,7 +20,6 @@ export class ReportController {
   @ApiResponse({ status: 200, description: 'Report data' })
   @ApiResponse({ status: 400, description: 'Validation error' })
   async getReport(@Query() filters: ReportFilterDto) {
-    // Coerce potentially string query params to numbers with safe defaults
     const parsed: ReportFilterDto = {
       ...filters,
       driverId:
@@ -32,11 +34,11 @@ export class ReportController {
   }
 
   @Get('export')
+  @UseGuards(AuthGuard)
   async exportReport(
     @Query() filters: ReportFilterDto,
     @Res() res: express.Response,
   ) {
-    // Keep export stable as well (page/limit won’t matter for CSV, but harmless)
     const parsed: ReportFilterDto = {
       ...filters,
       driverId:

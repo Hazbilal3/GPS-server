@@ -314,6 +314,7 @@ export class AuthService {
       sub: user.id,
       email: user.email || user.adminId || user.driverId,
       role: user.userRole,
+      driverId: user.driverId ?? null,
     };
     return {
       accessToken: this.jwtService.sign(payload),
