@@ -7,7 +7,7 @@ async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle('GPS Tracking API')
     .setDescription('API for managing GPS tracking data')
-    .setVersion('1.0')
+    .setVersion('1.1')
     .addTag('reports')
     .build();
   const document = SwaggerModule.createDocument(app, config);
