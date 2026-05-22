@@ -182,11 +182,11 @@ export class UploadService {
         for (const row of sheet as any[]) {
           const recipientName = String(row['Name'] ?? '').trim();
           const statusNum = Number(row['Status'] ?? 0);
-          const lastEvent = statusNum === 3 ? 'delivered' : `status_${statusNum}`;
+          const lastEvent = statusNum === 3 ? 'delivered' : statusNum === 2 ? 'attempted' : `status_${statusNum}`;
           const pieces = Number(row['Pieces'] ?? 1) || 1;
           const sequenceNo = String(row['Sequence'] ?? '');
           const rawZip = String(row['Zip'] ?? '');
-          const zipCode = rawZip.split('-')[0].trim();
+          const zipCode = rawZip.split('-')[0].trim().padStart(5, '0');
           const city = String(row['City'] ?? '').trim();
           const addressRaw = String(row['Address'] ?? '').trim();
 
@@ -527,7 +527,7 @@ const driverUploads = await prisma.upload.findMany({
           }
 
           for (const [zip, stopCount] of Object.entries(dayZips)) {
-            const route = zipToRoute.get(zip);
+            const route = zipToRoute.get(zip) ?? zipToRoute.get(zip.padStart(5, '0'));
             // For existing records: always prefer the stored historical rate.
             // This prevents route rate changes or deletions from rewriting past payroll.
             const hist = existingBreakdown.find(b => b.zip === zip && b.rate > 0);
