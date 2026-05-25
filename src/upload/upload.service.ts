@@ -157,15 +157,17 @@ export class UploadService {
     const workbook = XLSX.read(file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const sheet = XLSX.utils.sheet_to_json(worksheet);
 
-    // Validate new format — must have Name and Pieces columns
-    const firstRow = (sheet as any[])[0] ?? {};
-    if (!('Name' in firstRow) || !('Pieces' in firstRow)) {
+    // Validate format against header row, not first data row
+    const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as unknown[][];
+    const headers = (rawRows[0] ?? []) as string[];
+    if (!headers.includes('Name') || !headers.includes('Pieces')) {
       throw new BadRequestException(
         'Invalid file format. Upload the new manifest format with columns: Name, Status, Pieces, Sequence, City, Zip, Address.',
       );
     }
+
+    const sheet = XLSX.utils.sheet_to_json(worksheet);
 
     const createdAtOverride = date ? new Date(`${date}T12:00:00Z`) : undefined;
     const dbDriverMatch = await this.prisma.user.findFirst({
