@@ -22,6 +22,7 @@ model User {
   uploads            Upload[]
   payrolls           Payroll[]
   disputes           Dispute[]
+  orderDisputes      OrderDispute[]
   resetCodeHash        String?
   resetCodeExpiresAt   DateTime?
   resetCodeAttempts    Int       @default(0)
@@ -148,6 +149,23 @@ model DisputeMessage {
   attachmentUrl String?
   createdAt     DateTime @default(now())
   dispute       Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+}
+
+model OrderDispute {
+  id                Int      @id @default(autoincrement())
+  driverId          Int
+  driverName        String
+  date              DateTime
+  orderNumber       String
+  expectedLocation  String
+  deliveredLocation String
+  imageUrl          String?
+  status            String   @default("open")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  driver            User     @relation(fields: [driverId], references: [driverId])
+
+  @@index([driverId])
 }
 
 model DriverDocument {

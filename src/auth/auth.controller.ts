@@ -17,7 +17,7 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
-  @Throttle({ default: { limit: 5, ttl: 900000 } })
+  @Throttle({ default: { limit: 20, ttl: 900000 } })
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
@@ -28,13 +28,13 @@ export class AuthController {
     return this.authService.lookupIdentifier(dto);
   }
 
-  @Throttle({ default: { limit: 5, ttl: 900000 } })
+  @Throttle({ default: { limit: 20, ttl: 900000 } })
   @Post('forgot-send-code')
   sendCode(@Body() dto: SendResetCodeDto) {
     return this.authService.sendResetCode(dto);
   }
 
-  @Throttle({ default: { limit: 5, ttl: 900000 } })
+  @Throttle({ default: { limit: 20, ttl: 900000 } })
   @Post('forgot-verify-code')
   verify(@Body() dto: VerifyResetCodeDto) {
     return this.authService.verifyResetCode(dto);

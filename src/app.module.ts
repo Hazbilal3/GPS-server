@@ -15,6 +15,7 @@ import { DisputeModule } from './dispute/dispute.module';
 import { SpecialOrdersModule } from './special-orders/special-orders.module';
 import { LeaveRequestsModule } from './leave-requests/leave-requests.module';
 import { DriverDocumentsModule } from './driver-documents/driver-documents.module';
+import { OrderDisputesModule } from './order-disputes/order-disputes.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 
 @Module({
@@ -26,6 +27,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
     SpecialOrdersModule,
     LeaveRequestsModule,
     DriverDocumentsModule,
+    OrderDisputesModule,
   ],
   controllers: [
     UploadController,
