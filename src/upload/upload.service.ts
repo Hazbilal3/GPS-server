@@ -360,6 +360,28 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
    * It calculates payroll for a single driver and saves it to the DB.
    * Can be used within a transaction.
    */
+  async getDriverKpi(driverId: number) {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    const uploads = await this.prisma.upload.findMany({
+      where: { driverId, createdAt: { gte: monthStart, lte: monthEnd } },
+      select: { lastevent: true, pieces: true },
+    });
+
+    let delivered = 0, attempted = 0, totalPieces = 0;
+    for (const r of uploads) {
+      const ev = (r.lastevent ?? '').trim().toLowerCase();
+      const p = r.pieces ?? 1;
+      totalPieces += p;
+      if (ev.includes('delivered')) delivered += p;
+      else if (ev === 'attempted' || ev === 'status_2') attempted += p;
+    }
+
+    return { delivered, attempted, totalPieces };
+  }
+
   private async calculateAndSavePayrollForDriver(
     driverId: number,
     driver: User,

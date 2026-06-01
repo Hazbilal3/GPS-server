@@ -70,6 +70,16 @@ export class UploadController {
     return this.uploadService.getDailyPayroll();
   }
 
+  @Get('driver-kpi/:driverId')
+  @UseGuards(AuthGuard)
+  async getDriverKpi(
+    @Req() req: any,
+    @Param('driverId', ParseIntPipe) driverId: number,
+  ) {
+    if (req.user.role !== 1 && req.user.driverId !== driverId) throw new ForbiddenException();
+    return this.uploadService.getDriverKpi(driverId);
+  }
+
   @Get('payroll/daily/:driverId')
   @UseGuards(AuthGuard)
   async getDailyPayrollByDriver(
