@@ -54,6 +54,15 @@ export class SpecialOrdersController {
     return this.service.accept(id, body.driverId, body.driverName);
   }
 
+  @Patch(':id/reject')
+  @UseGuards(AuthGuard)
+  reject(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { driverId: number },
+  ) {
+    return this.service.reject(id, body.driverId);
+  }
+
   @Delete(':id')
   @UseGuards(AuthGuard, AdminGuard)
   remove(@Param('id', ParseIntPipe) id: number) {

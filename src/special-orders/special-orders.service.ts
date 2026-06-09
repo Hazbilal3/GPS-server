@@ -71,8 +71,11 @@ export class SpecialOrdersService {
     return all.filter((order) => {
       // Always show orders this driver accepted (so they see their accepted badge)
       if (order.status === 'accepted' && order.acceptedBy === driverId) return true;
-      // Hide accepted orders from everyone else
+      // Hide non-pending orders
       if (order.status !== 'pending') return false;
+      // Hide orders this driver already rejected
+      const rejected = (order.rejectedBy as number[]) || [];
+      if (rejected.includes(driverId)) return false;
       // Show pending orders targeted at this driver
       if (order.targetType === 'all') return true;
       const ids = (order.targetDriverIds as number[]) || [];
@@ -88,6 +91,30 @@ export class SpecialOrdersService {
     return this.prisma.specialOrder.update({
       where: { id },
       data: { status: 'accepted', acceptedBy: driverId, acceptedByName: driverName },
+    });
+  }
+
+  async reject(id: number, driverId: number) {
+    const order = await this.prisma.specialOrder.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.status === 'accepted') throw new BadRequestException('Order already accepted');
+
+    const currentRejected = (order.rejectedBy as number[]) || [];
+    if (currentRejected.includes(driverId)) return order; // already rejected
+
+    const rejectedBy = [...currentRejected, driverId];
+
+    // Mark as rejected when all targeted specific drivers have rejected
+    let newStatus = order.status;
+    if (order.targetType === 'specific') {
+      const targetIds = (order.targetDriverIds as number[]) || [];
+      const allRejected = targetIds.length > 0 && targetIds.every((id) => rejectedBy.includes(id));
+      if (allRejected) newStatus = 'rejected';
+    }
+
+    return this.prisma.specialOrder.update({
+      where: { id },
+      data: { rejectedBy, status: newStatus },
     });
   }
 
