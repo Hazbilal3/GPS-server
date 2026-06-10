@@ -1,4 +1,4 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, ParseIntPipe } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from 'src/user/dto/register.dto';
@@ -43,5 +43,15 @@ export class AuthController {
   @Post('forgot-reset')
   reset(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  @Get('check-driver/:driverId')
+  checkDriver(@Param('driverId', ParseIntPipe) driverId: number) {
+    return this.authService.checkDriver(driverId);
+  }
+
+  @Post('complete-registration')
+  completeRegistration(@Body() body: { driverId: number; password: string }) {
+    return this.authService.completeRegistration(body.driverId, body.password);
   }
 }

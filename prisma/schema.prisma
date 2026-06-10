@@ -11,7 +11,7 @@ model User {
   id                 Int       @id @default(autoincrement())
   driverId           Int?      @unique
   email              String    @unique
-  password           String
+  password           String?   // null = pending registration (driver sets own password via mobile)
   userRole           Int
   adminId            Int?
   fullName           String?

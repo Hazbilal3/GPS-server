@@ -122,10 +122,8 @@ export class DriverService {
     if (!driverId) {
       throw new BadRequestException('driverId is required');
     }
-    if (!fullName || !phoneNumber || !email || !password) {
-      throw new BadRequestException(
-        'fullName, phoneNumber, email, and password are required',
-      );
+    if (!fullName || !phoneNumber || !email) {
+      throw new BadRequestException('fullName, phoneNumber, and email are required');
     }
 
     // Check uniqueness (optional but helpful before hitting DB unique constraints)
@@ -154,7 +152,7 @@ export class DriverService {
       throw new ConflictException(`driverId ${driverId} already exists`);
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = password ? await bcrypt.hash(password, 10) : null;
 
     const created = await this.prisma.user.create({
       data: {
@@ -163,7 +161,8 @@ export class DriverService {
         fullName,
         phoneNumber,
         email,
-        password: passwordHash,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        password: passwordHash as any,
         userRole,
         salaryType: salaryType ?? null,
         fixedSalary: fixedSalary ?? null,

@@ -15,7 +15,7 @@ export class CreateDriverDto {
   fullName!: string;
   phoneNumber!: string;
   email!: string;
-  password!: string;
+  password?: string; // optional — if omitted, driver sets own password via mobile app
   userRole?: number;
   adminId?: number | null;
   salaryType?: string;

@@ -260,6 +260,50 @@ export class AuthService {
     return { success: true, message: 'Password updated. You can log in now.' };
   }
 
+  // ===== Option-B mobile registration =====
+
+  // Check if driverId exists and is pending registration (no password set yet)
+  async checkDriver(driverId: number) {
+    const user = await this.prisma.user.findFirst({
+      where: { driverId, userRole: 2 },
+      select: { id: true, fullName: true, email: true, password: true },
+    });
+
+    if (!user) throw new NotFoundException('No driver found with that ID. Contact your admin.');
+    if (user.password) throw new BadRequestException('Account already registered. Please log in.');
+
+    return {
+      driverId,
+      fullName: user.fullName,
+      maskedEmail: this.maskEmail(user.email),
+      status: 'pending',
+      message: 'Driver found. Proceed to set your password.',
+    };
+  }
+
+  // Complete registration: set password for a pending driver, return token immediately
+  async completeRegistration(driverId: number, password: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { driverId, userRole: 2 },
+      select: { id: true, fullName: true, email: true, password: true },
+    });
+
+    if (!user) throw new NotFoundException('Driver not found.');
+    if (user.password) throw new BadRequestException('Account already registered. Please log in.');
+    if (!password || password.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters.');
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    await this.prisma.user.update({ where: { id: user.id }, data: { password: hashed } });
+
+    const tokenPayload = { sub: user.id, role: 2, driverId };
+    return {
+      accessToken: this.jwtService.sign(tokenPayload),
+      user: { id: user.id, name: user.fullName, email: user.email, role: 2, driverId },
+    };
+  }
+
   // ===== Regular register/login (kept from your code) =====
   async register(dto: RegisterDto) {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -303,7 +347,13 @@ export class AuthService {
       user = await this.prisma.user.findFirst({
         where: { driverId: dto.driverId, userRole: 2 },
       });
-      if (!user || !(await bcrypt.compare(dto.password, user.password))) {
+      if (!user) throw new UnauthorizedException('Invalid driver credentials');
+      if (!user.password) {
+        throw new UnauthorizedException(
+          'Account not activated. Please complete registration on the mobile app.',
+        );
+      }
+      if (!(await bcrypt.compare(dto.password, user.password))) {
         throw new UnauthorizedException('Invalid driver credentials');
       }
     } else {
