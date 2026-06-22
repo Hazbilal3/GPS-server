@@ -177,6 +177,19 @@ export class UploadService {
     const currentSalaryType = dbDriverMatch?.salaryType || 'Regular';
     const currentFixedRate = dbDriverMatch?.fixedSalary || 0;
 
+    // If no uploads exist yet for this date, wipe any stale PayrollAdjustment entries
+    // so that a delete+re-upload always starts clean in the daily view.
+    const uploadDateStr = date || new Date().toISOString().split('T')[0];
+    const { start: dayStart, end: dayEnd } = getUtcDayBounds(uploadDateStr);
+    const existingCount = await this.prisma.upload.count({
+      where: { driverId, createdAt: { gte: dayStart, lt: dayEnd } },
+    });
+    if (existingCount === 0) {
+      await this.prisma.payrollAdjustment.deleteMany({
+        where: { driverId, date: uploadDateStr },
+      });
+    }
+
     const uploads: any[] = [];
 
     const transactionResult = await this.prisma.$transaction(
@@ -269,6 +282,11 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
       driverId,
       createdAt: { gte: periodStart, lt: queryEndDate }, // Use the correct Sat-Fri range
     },
+  });
+
+  // Delete per-day adjustments for this date so they don't persist after a delete+reupload
+  await this.prisma.payrollAdjustment.deleteMany({
+    where: { driverId, date: dateStr },
   });
 
   // 4. Act based on remaining uploads
@@ -554,7 +572,7 @@ const driverUploads = await prisma.upload.findMany({
             const route = zipToRoute.get(zip) ?? zipToRoute.get(zip.padStart(5, '0'));
             // For existing records: always prefer the stored historical rate.
             // This prevents route rate changes or deletions from rewriting past payroll.
-            const hist = existingBreakdown.find(b => b.zip === zip && b.rate > 0);
+            const hist = existingBreakdown.find(b => b.zip === zip && b.date === dateKey && b.rate > 0);
             let rate = 0;
             if (hist) {
               rate = hist.rate;
@@ -795,43 +813,61 @@ const driverUploads = await prisma.upload.findMany({
   async getDailyPayroll(driverId?: number): Promise<any[]> {
     this.logger.log(`Fetching daily payroll... Driver: ${driverId ?? 'All'}`);
 
-    // 1. Get relevant user IDs
+    // 1. Get relevant driver IDs
     const driverFilter = driverId ? { driverId } : { driverId: { not: null } };
     const drivers = await this.prisma.user.findMany({ where: driverFilter });
     const driverIds = drivers.map((d) => d.driverId).filter(Boolean) as number[];
     if (driverIds.length === 0) return [];
 
-    // 2. Read stored weekly payroll records — these hold historically-accurate
-    //    amounts (rates frozen at upload time, not recalculated from current routes).
+    // 2. Read stored weekly payroll records
     const storedPayrolls = await this.prisma.payroll.findMany({
       where: { driverId: { in: driverIds } },
       select: {
         driverId: true,
         driverName: true,
         weekNumber: true,
-        totalDeduction: true,
-        totalBonus: true,
         zipBreakdown: true,
       },
       orderBy: { weekNumber: 'desc' },
     });
 
-    // 3. Derive daily records from stored zipBreakdown (each entry has a date field)
+    // 3. Load per-day adjustments for all relevant drivers
+    const adjustments = await this.prisma.payrollAdjustment.findMany({
+      where: { driverId: { in: driverIds } },
+    });
+
+    // Index adjustments by "driverId|date"
+    const adjByDriverDate: Record<string, { deduction: number; bonus: number; deductionReasons: string[]; bonusReasons: string[] }> = {};
+    for (const a of adjustments) {
+      const key = `${a.driverId}|${a.date}`;
+      if (!adjByDriverDate[key]) adjByDriverDate[key] = { deduction: 0, bonus: 0, deductionReasons: [], bonusReasons: [] };
+      if (a.type === 'deduction') {
+        adjByDriverDate[key].deduction += a.amount;
+        adjByDriverDate[key].deductionReasons.push(a.reason);
+      } else {
+        adjByDriverDate[key].bonus += a.amount;
+        adjByDriverDate[key].bonusReasons.push(a.reason);
+      }
+    }
+
+    // 4. Derive daily records from stored zipBreakdown
     const dailyRecords: {
       driverId: number;
       driverName: string | null;
+      weekNumber: number;
       date: string;
       totalStops: number;
       subtotal: number;
       deduction: number;
       bonus: number;
       netPay: number;
+      deductionReasons: string[];
+      bonusReasons: string[];
     }[] = [];
 
     for (const payroll of storedPayrolls) {
       const breakdown = (payroll.zipBreakdown as any[]) || [];
 
-      // Group breakdown entries by date (only new-format records include date)
       const byDate: Record<string, any[]> = {};
       for (const entry of breakdown) {
         if (!entry.date) continue;
@@ -839,24 +875,26 @@ const driverUploads = await prisma.upload.findMany({
         byDate[entry.date].push(entry);
       }
 
-      const numDays = Object.keys(byDate).length || 1;
-      const proratedDeduction = (payroll.totalDeduction || 0) / numDays;
-      const proratedBonus = ((payroll.totalBonus as number) || 0) / numDays;
-
       for (const [date, entries] of Object.entries(byDate)) {
         const totalStops = entries.reduce((s: number, e: any) => s + (e.stops || 0), 0);
-        const subtotal = entries.reduce((s: number, e: any) => s + (e.amount || 0), 0);
-        const netPay = subtotal - proratedDeduction + proratedBonus;
+        const subtotal = Number(entries.reduce((s: number, e: any) => s + (e.amount || 0), 0).toFixed(2));
+        const adj = adjByDriverDate[`${payroll.driverId}|${date}`] ?? { deduction: 0, bonus: 0, deductionReasons: [], bonusReasons: [] };
+        const deduction = Number(adj.deduction.toFixed(2));
+        const bonus = Number(adj.bonus.toFixed(2));
+        const netPay = Number((subtotal - deduction + bonus).toFixed(2));
 
         dailyRecords.push({
           driverId: payroll.driverId,
           driverName: payroll.driverName,
+          weekNumber: payroll.weekNumber,
           date,
           totalStops,
-          subtotal: Number(subtotal.toFixed(2)),
-          deduction: Number(proratedDeduction.toFixed(2)),
-          bonus: Number(proratedBonus.toFixed(2)),
-          netPay: Number(netPay.toFixed(2)),
+          subtotal,
+          deduction,
+          bonus,
+          netPay,
+          deductionReasons: adj.deductionReasons,
+          bonusReasons: adj.bonusReasons,
         });
       }
     }

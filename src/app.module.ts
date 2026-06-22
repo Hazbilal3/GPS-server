@@ -16,6 +16,9 @@ import { SpecialOrdersModule } from './special-orders/special-orders.module';
 import { LeaveRequestsModule } from './leave-requests/leave-requests.module';
 import { DriverDocumentsModule } from './driver-documents/driver-documents.module';
 import { OrderDisputesModule } from './order-disputes/order-disputes.module';
+import { AssignModule } from './assign/assign.module';
+import { PayrollOverrideModule } from './payroll-override/payroll-override.module';
+import { PayrollAdjustmentModule } from './payroll-adjustment/payroll-adjustment.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 
 @Module({
@@ -28,6 +31,9 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
     LeaveRequestsModule,
     DriverDocumentsModule,
     OrderDisputesModule,
+    AssignModule,
+    PayrollOverrideModule,
+    PayrollAdjustmentModule,
   ],
   controllers: [
     UploadController,

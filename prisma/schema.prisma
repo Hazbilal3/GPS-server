@@ -209,3 +209,30 @@ model SpecialOrder {
   updatedAt       DateTime @updatedAt
 }
 
+model PayrollAdjustment {
+  id         Int      @id @default(autoincrement())
+  driverId   Int
+  weekNumber Int
+  date       String   // YYYY-MM-DD — the specific day this applies to
+  type       String   // "deduction" | "bonus"
+  amount     Float
+  reason     String
+  createdAt  DateTime @default(now())
+
+  @@index([driverId, weekNumber])
+  @@index([driverId, date])
+}
+
+model PayrollRateOverride {
+  id           Int      @id @default(autoincrement())
+  driverId     Int
+  zipCode      String
+  date         String   // YYYY-MM-DD stored as string to avoid timezone issues
+  originalRate Float
+  newRate      Float
+  changedBy    String
+  changedAt    DateTime @default(now())
+
+  @@unique([driverId, zipCode, date])
+}
+
