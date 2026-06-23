@@ -82,6 +82,13 @@ export class DisputeController {
     return this.disputeService.getDriverDisputes(driverId);
   }
 
+  @Get('unseen-count')
+  @UseGuards(AuthGuard, AdminGuard)
+  async getUnseenCount() {
+    const count = await this.disputeService.getUnseenCount();
+    return { count };
+  }
+
   @Get(':id')
   @UseGuards(AuthGuard)
   async getOne(@Param('id', ParseIntPipe) id: number) {

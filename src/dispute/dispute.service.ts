@@ -89,6 +89,11 @@ export class DisputeService {
     });
   }
 
+  // Admin: count open (unseen) disputes
+  async getUnseenCount(): Promise<number> {
+    return this.prisma.dispute.count({ where: { status: 'open' } });
+  }
+
   // Admin: delete a dispute
   async deleteDispute(id: number) {
     const dispute = await this.prisma.dispute.findUnique({ where: { id } });
