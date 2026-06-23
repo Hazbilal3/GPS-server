@@ -56,6 +56,17 @@ export class DriverController {
     return this.driverService.savePushToken(driverId, body.pushToken);
   }
 
+  @Patch(':driverId/email')
+  @UseGuards(AuthGuard)
+  updateEmail(
+    @Req() req: any,
+    @Param('driverId', ParseIntPipe) driverId: number,
+    @Body() body: { email: string },
+  ) {
+    if (req.user.role !== 1 && req.user.driverId !== driverId) throw new ForbiddenException();
+    return this.driverService.updateByDriverId(driverId, { email: body.email });
+  }
+
   @Patch(':driverId')
   @UseGuards(AuthGuard, AdminGuard)
   update(

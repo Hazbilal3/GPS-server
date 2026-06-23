@@ -223,6 +223,14 @@ model PayrollAdjustment {
   @@index([driverId, date])
 }
 
+model AssignDraft {
+  id        Int      @id @default(autoincrement())
+  name      String
+  rows      Json     // Array of { driverId: number, routes: string[] }
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model PayrollRateOverride {
   id           Int      @id @default(autoincrement())
   driverId     Int

@@ -41,7 +41,7 @@ export class AssignService {
   }
 
   async sendAssignments(assignments: AssignmentRow[]): Promise<void> {
-    const adminEmail = 'c.taveras@expeditedtransport.com';
+    const adminEmail = 'ets.routes@gmail.com';
     const appName = process.env.APP_NAME || 'GPS';
     const today = new Date().toLocaleDateString('en-US', {
       weekday: 'long',
@@ -142,5 +142,23 @@ export class AssignService {
         text: `Daily Route Assignments (${today}):\n\n${summaryTextLines.join('\n')}`,
       })
       .catch((err) => this.logger.error('Admin summary email failed', err));
+  }
+
+  // ── Draft CRUD ────────────────────────────────────────────────────────────
+
+  async createDraft(name: string, rows: { driverId: number; routes: string[] }[]) {
+    return this.prisma.assignDraft.create({ data: { name, rows } });
+  }
+
+  async listDrafts() {
+    return this.prisma.assignDraft.findMany({ orderBy: { updatedAt: 'desc' } });
+  }
+
+  async updateDraft(id: number, name: string, rows: { driverId: number; routes: string[] }[]) {
+    return this.prisma.assignDraft.update({ where: { id }, data: { name, rows } });
+  }
+
+  async deleteDraft(id: number) {
+    return this.prisma.assignDraft.delete({ where: { id } });
   }
 }
