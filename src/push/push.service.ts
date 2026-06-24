@@ -18,6 +18,8 @@ export class PushService {
       title,
       body,
       sound: 'default',
+      channelId: 'default',
+      priority: 'high',
       data: data ?? {},
     }));
 

@@ -100,6 +100,7 @@ export class AssignService {
           [driver.pushToken],
           'Route Assigned',
           `Your routes for today: ${routeList}`,
+          { type: 'route_assigned' },
         );
       }
 

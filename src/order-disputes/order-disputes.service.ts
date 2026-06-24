@@ -43,7 +43,7 @@ export class OrderDisputesService {
         [user.pushToken],
         'New Order Dispute Filed',
         `A dispute was opened for order #${data.orderNumber}`,
-        { disputeId: dispute.id },
+        { type: 'order_dispute', disputeId: dispute.id },
       );
     }
 

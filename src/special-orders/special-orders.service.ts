@@ -52,7 +52,7 @@ export class SpecialOrdersService {
         tokens,
         'New Special Order',
         `A new delivery order is available: ${routeName}`,
-        { orderId },
+        { type: 'new_order', orderId },
       );
     } catch (_) {}
   }
