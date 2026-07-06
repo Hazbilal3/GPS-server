@@ -338,7 +338,7 @@ export class AuthService {
     let user: any;
     if (dto.userRole === 1) {
       user = await this.prisma.user.findFirst({
-        where: { adminId: dto.adminId, userRole: 1 },
+        where: { adminId: dto.adminId, userRole: { in: [1, 3] } },
       });
       if (!user || !(await bcrypt.compare(dto.password, user.password))) {
         throw new UnauthorizedException('Invalid admin credentials');

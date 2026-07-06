@@ -58,16 +58,46 @@ export class UploadController {
     return this.uploadService.deleteByDriverAndDate(driverId, date);
   }
 
+  private maskWeekly(data: any[]): any[] {
+    return data.map((week) => ({
+      ...week,
+      subtotal: null,
+      totalDeductions: week.totalDeductions,
+      totalBonuses: week.totalBonuses,
+      netPay: null,
+      drivers: (week.drivers ?? []).map((d: any) => ({
+        ...d,
+        subtotal: null,
+        totalDeduction: d.totalDeduction,
+        totalBonus: d.totalBonus,
+        netPay: null,
+        zipBreakdown: [],
+      })),
+    }));
+  }
+
+  private maskDaily(data: any[]): any[] {
+    return data.map((r) => ({
+      ...r,
+      subtotal: null,
+      deduction: r.deduction,
+      bonus: r.bonus,
+      netPay: null,
+    }));
+  }
+
   @Get('payroll')
   @UseGuards(AuthGuard, AdminGuard)
-  async getPayroll(): Promise<any[]> {
-    return this.uploadService.getDriverPayroll();
+  async getPayroll(@Req() req: any): Promise<any[]> {
+    const data = await this.uploadService.getDriverPayroll();
+    return req.user.role === 3 ? this.maskWeekly(data) : data;
   }
 
   @Get('payroll/daily')
   @UseGuards(AuthGuard, AdminGuard)
-  async getDailyPayroll(): Promise<any[]> {
-    return this.uploadService.getDailyPayroll();
+  async getDailyPayroll(@Req() req: any): Promise<any[]> {
+    const data = await this.uploadService.getDailyPayroll();
+    return req.user.role === 3 ? this.maskDaily(data) : data;
   }
 
   @Get('driver-kpi/:driverId')
@@ -86,8 +116,9 @@ export class UploadController {
     @Req() req: any,
     @Param('driverId', ParseIntPipe) driverId: number,
   ): Promise<any[]> {
-    if (req.user.role !== 1 && req.user.driverId !== driverId) throw new ForbiddenException();
-    return this.uploadService.getDailyPayroll(driverId);
+    if (req.user.role !== 1 && req.user.role !== 3 && req.user.driverId !== driverId) throw new ForbiddenException();
+    const data = await this.uploadService.getDailyPayroll(driverId);
+    return req.user.role === 3 ? this.maskDaily(data) : data;
   }
 
   @Get('payroll/:driverId')
@@ -96,11 +127,11 @@ export class UploadController {
     @Req() req: any,
     @Param('driverId', ParseIntPipe) driverId: number,
   ): Promise<any[]> {
-    // Drivers can only fetch their own payroll; admins can fetch any
-    if (req.user.role !== 1 && req.user.driverId !== driverId) {
+    if (req.user.role !== 1 && req.user.role !== 3 && req.user.driverId !== driverId) {
       throw new ForbiddenException();
     }
-    return this.uploadService.getPayrollByDriver(driverId);
+    const data = await this.uploadService.getPayrollByDriver(driverId);
+    return req.user.role === 3 ? this.maskWeekly(data) : data;
   }
 
   @Patch('payroll/deduction')
@@ -150,6 +181,7 @@ export class UploadController {
       ratePerStopCompanyVehicle?: number;
       baseRate?: number;
       baseRateCompanyVehicle?: number;
+      territory?: string;
       zone?: string;
       status?: string;
       zipCode?: string[];

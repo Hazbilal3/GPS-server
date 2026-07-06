@@ -968,6 +968,7 @@ const driverUploads = await prisma.upload.findMany({
     ratePerStopCompanyVehicle?: number;
     baseRate?: number;
     baseRateCompanyVehicle?: number;
+    territory?: string;
     zone?: string;
     status?: string;
     zipCode?: string[];
@@ -982,6 +983,7 @@ const driverUploads = await prisma.upload.findMany({
         ratePerStopCompanyVehicle: data.ratePerStopCompanyVehicle ? Number(data.ratePerStopCompanyVehicle) : null,
         baseRate: data.baseRate ? Number(data.baseRate) : null,
         baseRateCompanyVehicle: data.baseRateCompanyVehicle ? Number(data.baseRateCompanyVehicle) : null,
+        territory: data.territory || null,
         zone: data.zone || null,
         status: data.status || 'Active',
         zipCode: data.zipCode || [],

@@ -111,6 +111,7 @@ model Route {
   routeNumber               String?  @map("route_number") // e.g. '222'
   description               String   @map("description") // e.g. 'PAWCUTUCK'
   ratePerStop               Float    @map("rate_per_stop") // e.g. 2.35
+  territory                 String?  @map("territory") // e.g. 'T1'
   zone                      String?  @map("zone") // e.g. 'Zone B'
   status                    String?  @map("status") // e.g. 'Active'
   baseRate                  Float?   @map("base_rate") // e.g. 'Active'
@@ -242,5 +243,18 @@ model PayrollRateOverride {
   changedAt    DateTime @default(now())
 
   @@unique([driverId, zipCode, date])
+}
+
+model DriverSchedule {
+  id         Int      @id @default(autoincrement())
+  driverId   Int
+  driverName String
+  date       String   // YYYY-MM-DD
+  status     String   @default("available") // "available" | "off"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([driverId, date])
+  @@index([date])
 }
 

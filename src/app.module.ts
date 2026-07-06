@@ -19,6 +19,7 @@ import { OrderDisputesModule } from './order-disputes/order-disputes.module';
 import { AssignModule } from './assign/assign.module';
 import { PayrollOverrideModule } from './payroll-override/payroll-override.module';
 import { PayrollAdjustmentModule } from './payroll-adjustment/payroll-adjustment.module';
+import { DriverScheduleModule } from './driver-schedule/driver-schedule.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 
 @Module({
@@ -34,6 +35,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
     AssignModule,
     PayrollOverrideModule,
     PayrollAdjustmentModule,
+    DriverScheduleModule,
   ],
   controllers: [
     UploadController,
