@@ -21,6 +21,7 @@ import { PayrollOverrideModule } from './payroll-override/payroll-override.modul
 import { PayrollAdjustmentModule } from './payroll-adjustment/payroll-adjustment.module';
 import { DriverScheduleModule } from './driver-schedule/driver-schedule.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { PoolModule } from './pool/pool.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
     PayrollOverrideModule,
     PayrollAdjustmentModule,
     DriverScheduleModule,
+    PoolModule,
   ],
   controllers: [
     UploadController,

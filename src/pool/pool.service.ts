@@ -57,8 +57,16 @@ export class PoolService {
     });
 
     if (!user) throw new NotFoundException('User not found.');
-    if (user.poolStatus !== 'pending') {
-      throw new BadRequestException('User is not in pending state.');
+    if (user.poolStatus !== 'pending' && user.poolStatus !== 'rejected') {
+      throw new BadRequestException('Document submission is not allowed in this state.');
+    }
+
+    // If re-submitting after rejection, reset status back to pending
+    if (user.poolStatus === 'rejected') {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { poolStatus: 'pending' },
+      });
     }
 
     const existingPoolEntry = await this.prisma.driverPool.findUnique({
@@ -68,7 +76,7 @@ export class PoolService {
     if (existingPoolEntry) {
       return this.prisma.driverPool.update({
         where: { userId },
-        data: { docUrl },
+        data: { docUrl, status: 'pending' },
       });
     } else {
       return this.prisma.driverPool.create({
@@ -105,6 +113,21 @@ export class PoolService {
     });
   }
 
+  async getAll(status?: string) {
+    return this.prisma.driverPool.findMany({
+      where: status ? { status } : undefined,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getNextDriverId(): Promise<{ nextId: number }> {
+    const result = await this.prisma.user.aggregate({
+      _max: { driverId: true },
+    });
+    const maxId = result._max.driverId ?? 100000;
+    return { nextId: maxId + 1 };
+  }
+
   async approve(id: number, assignedDriverId: number) {
     const entry = await this.prisma.driverPool.findUnique({ where: { id } });
     if (!entry) throw new NotFoundException('Pool entry not found.');
@@ -126,6 +149,24 @@ export class PoolService {
       where: { id: entry.userId },
       data: { driverId: assignedDriverId, poolStatus: 'approved' },
     });
+
+    // Store the pool document as a verified DriverDocument so it appears in profile + driver directory
+    const storedName = entry.docUrl.split('/').pop() ?? entry.docName;
+    const existingDoc = await this.prisma.driverDocument.findFirst({
+      where: { driverId: assignedDriverId, storedName },
+    });
+    if (!existingDoc) {
+      await this.prisma.driverDocument.create({
+        data: {
+          driverId: assignedDriverId,
+          fileName: storedName,       // actual filename with extension (used for image detection)
+          storedName,
+          description: entry.docName, // human-readable: "Driver's License"
+          fileUrl: entry.docUrl,      // "/pool/file/:filename" — served by pool file endpoint
+          status: 'verified',
+        },
+      });
+    }
 
     // Send email with assigned driver ID
     await this.sendApprovalEmail(entry.email, entry.fullName, assignedDriverId);

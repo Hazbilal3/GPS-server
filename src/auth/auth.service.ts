@@ -1,6 +1,7 @@
 // src/auth/auth.service.ts
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -63,25 +64,26 @@ export class AuthService {
     return Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
   }
 
-  private async sendOtpEmail(to: string, code: string) {
+  private async sendOtpEmail(
+    to: string,
+    code: string,
+    subject?: string,
+    bodyHtml?: string,
+  ) {
     const appName = process.env.APP_NAME || 'Our App';
 
-    // 1) Always use MAIL_FROM for the *visible* From
-    //    Never fall back to SMTP_USER, so your owner email won't show.
     const from =
       process.env.MAIL_FROM ||
       `"${appName} (no-reply)" <no-reply@${process.env.MAIL_DOMAIN || 'example.com'}>`;
 
-    // 2) Make replies go nowhere (or to an unmonitored mailbox)
     const replyTo =
       process.env.MAIL_REPLY_TO ||
       `no-reply@${process.env.MAIL_DOMAIN || 'example.com'}`;
 
-    const subject = `${appName} password reset code: ${code}`;
-    const text = `Your ${appName} password reset code is ${code}. It expires in 10 minutes. If you didn’t request this, ignore this email.`;
-    const html = `
+    const finalSubject = subject ?? `${appName} verification code: ${code}`;
+    const finalHtml = bodyHtml ?? `
     <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6">
-      <p>Use this verification code to reset your password:</p>
+      <p>Use this verification code:</p>
       <p style="font-size:24px;letter-spacing:6px;font-weight:700;margin:16px 0">${code}</p>
       <p>This code expires in <strong>10 minutes</strong>.</p>
       <p>If you didn't request this, you can safely ignore this email.</p>
@@ -90,25 +92,22 @@ export class AuthService {
 
     try {
       const info = await this.transporter.sendMail({
-        from, // visible From (what recipients see)
-        sender: process.env.SMTP_USER, // aligns with the authenticated account
+        from,
+        sender: process.env.SMTP_USER,
         to,
-        subject,
-        text,
-        html,
-        replyTo, // where a “reply” would be addressed
-        envelope: {
-          // SMTP envelope (Return-Path); not shown to users
-          from: replyTo,
-          to,
-        },
+        subject: finalSubject,
+        text: `Your verification code is ${code}. It expires in 10 minutes.`,
+        html: finalHtml,
+        replyTo,
+        envelope: { from: replyTo, to },
         headers: {
           'Auto-Submitted': 'auto-generated',
           'X-Auto-Response-Suppress': 'All',
         },
       });
       return info.messageId;
-    } catch {
+    } catch (error) {
+      console.error('Nodemailer Error:', error);
       throw new InternalServerErrorException('Failed to send email');
     }
   }
@@ -260,6 +259,85 @@ export class AuthService {
     return { success: true, message: 'Password updated. You can log in now.' };
   }
 
+  // ===== New Self-Registration Flow =====
+
+  async driverSignup(dto: {
+    fullName: string;
+    email: string;
+    phoneNumber?: string;
+    password: string;
+  }) {
+    // Check for duplicate email or phone number
+    const existingEmail = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    if (existingEmail) throw new ConflictException('An account with this email already exists.');
+
+    if (dto.phoneNumber) {
+      const existingPhone = await this.prisma.user.findUnique({ where: { phoneNumber: dto.phoneNumber } });
+      if (existingPhone) throw new ConflictException('An account with this phone number already exists.');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const code = this.generateOtp();
+    const codeHash = await bcrypt.hash(code, 10);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    const user = await this.prisma.user.create({
+      data: {
+        fullName: dto.fullName,
+        email: dto.email,
+        phoneNumber: dto.phoneNumber || null,
+        password: hashedPassword,
+        userRole: 2,
+        emailVerified: false,
+        emailOtpHash: codeHash,
+        emailOtpExpiresAt: expiresAt,
+        poolStatus: 'pending',
+      },
+    });
+
+    const appName = process.env.APP_NAME || 'CMJL';
+    await this.sendOtpEmail(
+      dto.email,
+      code,
+      `${appName} — Verify your email`,
+      `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6">
+        <p>Hi ${dto.fullName},</p>
+        <p>Welcome to ${appName}! Use this code to verify your email address:</p>
+        <p style="font-size:28px;letter-spacing:8px;font-weight:700;margin:20px 0;color:#4f9cf9">${code}</p>
+        <p>This code expires in <strong>10 minutes</strong>.</p>
+      </div>`,
+    );
+
+    return { userId: user.id, message: 'OTP sent to your email. Please verify to continue.' };
+  }
+
+  async verifySignupOtp(userId: number, code: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, emailOtpHash: true, emailOtpExpiresAt: true, emailVerified: true, userRole: true, poolStatus: true, driverId: true },
+    });
+
+    if (!user) throw new NotFoundException('User not found.');
+    if (user.emailVerified) throw new BadRequestException('Email already verified.');
+    if (!user.emailOtpHash || !user.emailOtpExpiresAt) throw new BadRequestException('No OTP request found.');
+    if (user.emailOtpExpiresAt < new Date()) throw new BadRequestException('OTP expired. Please sign up again.');
+
+    const ok = await bcrypt.compare(code, user.emailOtpHash);
+    if (!ok) throw new BadRequestException('Invalid OTP code.');
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { emailVerified: true, emailOtpHash: null, emailOtpExpiresAt: null },
+    });
+
+    const payload = { sub: userId, role: user.userRole, driverId: user.driverId, poolStatus: user.poolStatus };
+    return {
+      accessToken: this.jwtService.sign(payload),
+      user: { id: userId, role: user.userRole, poolStatus: user.poolStatus, driverId: user.driverId },
+      message: 'Email verified successfully.',
+    };
+  }
+
   // ===== Option-B mobile registration =====
 
   // Check if driverId exists and is pending registration (no password set yet)
@@ -344,14 +422,25 @@ export class AuthService {
         throw new UnauthorizedException('Invalid admin credentials');
       }
     } else if (dto.userRole === 2) {
-      user = await this.prisma.user.findFirst({
-        where: { driverId: dto.driverId, userRole: 2 },
-      });
+      // Support both: driverId login (approved drivers) AND email login (pending pool drivers)
+      if (dto.driverId) {
+        user = await this.prisma.user.findFirst({
+          where: { driverId: dto.driverId, userRole: 2 },
+        });
+      } else if ((dto as any).email) {
+        user = await this.prisma.user.findFirst({
+          where: { email: (dto as any).email, userRole: 2 },
+        });
+      }
+
       if (!user) throw new UnauthorizedException('Invalid driver credentials');
       if (!user.password) {
         throw new UnauthorizedException(
           'Account not activated. Please complete registration on the mobile app.',
         );
+      }
+      if (!user.emailVerified && user.poolStatus === 'pending') {
+        throw new UnauthorizedException('Please verify your email first.');
       }
       if (!(await bcrypt.compare(dto.password, user.password))) {
         throw new UnauthorizedException('Invalid driver credentials');
@@ -365,6 +454,7 @@ export class AuthService {
       email: user.email || user.adminId || user.driverId,
       role: user.userRole,
       driverId: user.driverId ?? null,
+      poolStatus: user.poolStatus ?? null,
     };
     return {
       accessToken: this.jwtService.sign(payload),
@@ -375,6 +465,7 @@ export class AuthService {
         role: user.userRole,
         driverId: user.driverId,
         adminId: user.adminId,
+        poolStatus: user.poolStatus ?? null,
       },
     };
   }

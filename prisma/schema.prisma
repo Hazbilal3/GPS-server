@@ -38,6 +38,12 @@ model User {
   registrationExpiry   DateTime?
   licenseNumber        String?
   licenseExpiry        DateTime?
+  // --- New: self-registration flow ---
+  emailVerified        Boolean   @default(false)
+  emailOtpHash         String?
+  emailOtpExpiresAt    DateTime?
+  poolStatus           String?   // null | "pending" | "approved" | "rejected"
+  poolEntry            DriverPool?
 }
 
 model Upload {
@@ -258,3 +264,19 @@ model DriverSchedule {
   @@index([date])
 }
 
+model DriverPool {
+  id               Int      @id @default(autoincrement())
+  userId           Int      @unique
+  user             User     @relation(fields: [userId], references: [id])
+  fullName         String
+  email            String
+  phoneNumber      String?
+  docName          String   @default("Driver's License")
+  docUrl           String
+  status           String   @default("pending") // "pending" | "approved" | "rejected"
+  assignedDriverId Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([status])
+}

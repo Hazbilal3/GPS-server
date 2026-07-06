@@ -17,6 +17,16 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
+  @Post('driver-signup')
+  driverSignup(@Body() body: { fullName: string; email: string; phoneNumber?: string; password: string }) {
+    return this.authService.driverSignup(body);
+  }
+
+  @Post('verify-signup-otp')
+  verifySignupOtp(@Body() body: { userId: number; code: string }) {
+    return this.authService.verifySignupOtp(body.userId, body.code);
+  }
+
   @Throttle({ default: { limit: 20, ttl: 900000 } })
   @Post('login')
   login(@Body() dto: LoginDto) {
