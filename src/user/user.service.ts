@@ -8,6 +8,8 @@ import {
 import { PrismaService } from '../prisma.service';
 import { CreateDriverDto, UpdateDriverDto } from './user.entity';
 import * as bcrypt from 'bcryptjs';
+import * as fs from 'fs';
+import * as path from 'path';
 @Injectable()
 export class DriverService {
   constructor(private prisma: PrismaService) {}
@@ -74,14 +76,30 @@ export class DriverService {
         await prisma.driverPool.deleteMany({ where: { userId: driver.id } });
 
         if (driver.driverId !== null) {
+          // Fetch document file paths before deleting DB records so we can remove files from disk
+          const docs = await prisma.driverDocument.findMany({
+            where: { driverId: driver.driverId },
+            select: { fileUrl: true },
+          });
+
           // These all reference User.driverId (FK)
           await prisma.upload.deleteMany({ where: { driverId: driver.driverId } });
           await prisma.dispute.deleteMany({ where: { driverId: driver.driverId } });
           await prisma.payroll.deleteMany({ where: { driverId: driver.driverId } });
           await prisma.orderDispute.deleteMany({ where: { driverId: driver.driverId } });
-          // No FK constraint but clean up anyway
           await prisma.driverDocument.deleteMany({ where: { driverId: driver.driverId } });
           await prisma.leaveRequest.deleteMany({ where: { driverId: driver.driverId } });
+
+          // Delete physical files from disk after DB records are removed
+          for (const doc of docs) {
+            try {
+              const filename = doc.fileUrl.split('/').pop();
+              if (!filename) continue;
+              // Pool compliance docs live in uploads/pool-docs/
+              const filePath = path.join(process.cwd(), 'uploads', 'pool-docs', filename);
+              if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            } catch { /* ignore individual file errors */ }
+          }
         }
 
         // Finally delete the user

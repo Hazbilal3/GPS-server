@@ -231,7 +231,9 @@ export class PoolService {
       },
     });
 
-    // Create DriverDocument records for each submitted compliance document
+    // Replace any existing DriverDocument records for this driverId (handles reused IDs / orphaned records)
+    await this.prisma.driverDocument.deleteMany({ where: { driverId: assignedDriverId } });
+
     const docs = [
       { name: 'Insurance', url: entry.insuranceDocUrl },
       { name: 'Registration', url: entry.registrationDocUrl },
@@ -242,21 +244,16 @@ export class PoolService {
     for (const doc of docs) {
       if (!doc.url) continue;
       const storedName = doc.url.split('/').pop() ?? doc.name;
-      const existingDoc = await this.prisma.driverDocument.findFirst({
-        where: { driverId: assignedDriverId, storedName },
+      await this.prisma.driverDocument.create({
+        data: {
+          driverId: assignedDriverId,
+          fileName: storedName,
+          storedName,
+          description: doc.name,
+          fileUrl: doc.url,
+          status: 'verified',
+        },
       });
-      if (!existingDoc) {
-        await this.prisma.driverDocument.create({
-          data: {
-            driverId: assignedDriverId,
-            fileName: storedName,
-            storedName,
-            description: doc.name,
-            fileUrl: doc.url,
-            status: 'verified',
-          },
-        });
-      }
     }
 
     // Send email with assigned driver ID
