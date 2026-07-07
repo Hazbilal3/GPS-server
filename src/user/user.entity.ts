@@ -44,6 +44,8 @@ export class UpdateDriverDto {
   schedule?: string[];
   status?: string;
   driverAvailableToday?: boolean;
+  state?: string;
+  operatingType?: string;
   insuranceNumber?: string;
   insuranceExpiry?: string;
   registrationNumber?: string;

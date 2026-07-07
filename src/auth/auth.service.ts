@@ -40,11 +40,7 @@ export class AuthService {
       port,
       secure,
       auth: user && pass ? { user, pass } : undefined,
-      // Helpful defaults
-      tls: { minVersion: 'TLSv1.2' },
-      // TEMP: enable debug logs to server console while troubleshooting
-      logger: true,
-      debug: true,
+      tls: { rejectUnauthorized: false },
     });
   }
 
@@ -93,17 +89,10 @@ export class AuthService {
     try {
       const info = await this.transporter.sendMail({
         from,
-        sender: process.env.SMTP_USER,
         to,
         subject: finalSubject,
         text: `Your verification code is ${code}. It expires in 10 minutes.`,
         html: finalHtml,
-        replyTo,
-        envelope: { from: replyTo, to },
-        headers: {
-          'Auto-Submitted': 'auto-generated',
-          'X-Auto-Response-Suppress': 'All',
-        },
       });
       return info.messageId;
     } catch (error) {
@@ -266,6 +255,8 @@ export class AuthService {
     email: string;
     phoneNumber?: string;
     password: string;
+    state?: string;
+    operatingType?: string;
   }) {
     // Check for duplicate email or phone number
     const existingEmail = await this.prisma.user.findUnique({ where: { email: dto.email } });
@@ -292,6 +283,8 @@ export class AuthService {
         emailOtpHash: codeHash,
         emailOtpExpiresAt: expiresAt,
         poolStatus: 'pending',
+        state: dto.state || null,
+        operatingType: dto.operatingType || null,
       },
     });
 
@@ -416,7 +409,7 @@ export class AuthService {
     let user: any;
     if (dto.userRole === 1) {
       user = await this.prisma.user.findFirst({
-        where: { adminId: dto.adminId, userRole: { in: [1, 3] } },
+        where: { adminId: dto.adminId, userRole: { in: [1, 3, 4] } },
       });
       if (!user || !(await bcrypt.compare(dto.password, user.password))) {
         throw new UnauthorizedException('Invalid admin credentials');
@@ -441,6 +434,9 @@ export class AuthService {
       }
       if (!user.emailVerified && user.poolStatus === 'pending') {
         throw new UnauthorizedException('Please verify your email first.');
+      }
+      if (user.poolStatus === 'rejected') {
+        throw new UnauthorizedException('Your application has been rejected. Please contact support.');
       }
       if (!(await bcrypt.compare(dto.password, user.password))) {
         throw new UnauthorizedException('Invalid driver credentials');

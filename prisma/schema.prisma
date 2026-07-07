@@ -38,6 +38,8 @@ model User {
   registrationExpiry   DateTime?
   licenseNumber        String?
   licenseExpiry        DateTime?
+  state                String?
+  operatingType        String?   // "individual" | "company"
   // --- New: self-registration flow ---
   emailVerified        Boolean   @default(false)
   emailOtpHash         String?
@@ -265,18 +267,33 @@ model DriverSchedule {
 }
 
 model DriverPool {
-  id               Int      @id @default(autoincrement())
-  userId           Int      @unique
-  user             User     @relation(fields: [userId], references: [id])
+  id               Int       @id @default(autoincrement())
+  userId           Int       @unique
+  user             User      @relation(fields: [userId], references: [id])
   fullName         String
   email            String
   phoneNumber      String?
-  docName          String   @default("Driver's License")
-  docUrl           String
-  status           String   @default("pending") // "pending" | "approved" | "rejected"
+  state            String?
+  operatingType    String?   // "individual" | "company"
+  // Insurance
+  insuranceNumber  String?
+  insuranceExpiry  DateTime?
+  insuranceDocUrl  String?
+  // Registration
+  registrationNumber String?
+  registrationExpiry DateTime?
+  registrationDocUrl String?
+  // License
+  licenseNumber    String?
+  licenseExpiry    DateTime?
+  licenseDocUrl    String?
+  // Legacy single-doc fields (kept nullable for backward compat)
+  docName          String?
+  docUrl           String?
+  status           String    @default("pending") // "pending" | "approved" | "rejected"
   assignedDriverId Int?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([status])
 }

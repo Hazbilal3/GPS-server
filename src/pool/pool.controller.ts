@@ -61,6 +61,51 @@ export class PoolController {
     return this.service.submitDocument(req.user.sub, docUrl);
   }
 
+  @Post('submit-insurance')
+  @UseGuards(AuthGuard)
+  @UseInterceptors(FileInterceptor('file', { storage: poolDocStorage }))
+  async submitInsurance(
+    @Req() req: any,
+    @Body('number') number: string,
+    @Body('expiry') expiry: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Insurance document is required.');
+    if (!number) throw new BadRequestException('Insurance number is required.');
+    if (!expiry) throw new BadRequestException('Insurance expiry is required.');
+    return this.service.submitCard(req.user.sub, 'insurance', { number, expiry, docUrl: `/pool/file/${file.filename}` });
+  }
+
+  @Post('submit-registration')
+  @UseGuards(AuthGuard)
+  @UseInterceptors(FileInterceptor('file', { storage: poolDocStorage }))
+  async submitRegistration(
+    @Req() req: any,
+    @Body('number') number: string,
+    @Body('expiry') expiry: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Registration document is required.');
+    if (!number) throw new BadRequestException('Registration number is required.');
+    if (!expiry) throw new BadRequestException('Registration expiry is required.');
+    return this.service.submitCard(req.user.sub, 'registration', { number, expiry, docUrl: `/pool/file/${file.filename}` });
+  }
+
+  @Post('submit-license')
+  @UseGuards(AuthGuard)
+  @UseInterceptors(FileInterceptor('file', { storage: poolDocStorage }))
+  async submitLicense(
+    @Req() req: any,
+    @Body('number') number: string,
+    @Body('expiry') expiry: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('License document is required.');
+    if (!number) throw new BadRequestException('License number is required.');
+    if (!expiry) throw new BadRequestException('License expiry is required.');
+    return this.service.submitCard(req.user.sub, 'license', { number, expiry, docUrl: `/pool/file/${file.filename}` });
+  }
+
   @Get('my-status')
   @UseGuards(AuthGuard)
   async getMyStatus(@Req() req: any) {

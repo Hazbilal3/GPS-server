@@ -24,6 +24,8 @@ export class DriverService {
         fixedSalary: true,
         status: true,
         schedule: true,
+        state: true,
+        operatingType: true,
       },
     });
   }
@@ -41,6 +43,8 @@ export class DriverService {
         schedule: true,
         status: true,
         driverAvailableToday: true,
+        state: true,
+        operatingType: true,
         insuranceNumber: true,
         insuranceExpiry: true,
         registrationNumber: true,
@@ -63,18 +67,23 @@ export class DriverService {
 
     try {
       await this.prisma.$transaction(async (prisma) => {
-        // Export references User.id and Upload.id, so delete it first
+        // Export references User.id — delete first
         await prisma.export.deleteMany({ where: { driverId: driver.id } });
-        
+
+        // DriverPool references User.id (FK) — must delete before user
+        await prisma.driverPool.deleteMany({ where: { userId: driver.id } });
+
         if (driver.driverId !== null) {
-          // Upload references User.driverId
+          // These all reference User.driverId (FK)
           await prisma.upload.deleteMany({ where: { driverId: driver.driverId } });
-          // Dispute references User.driverId
           await prisma.dispute.deleteMany({ where: { driverId: driver.driverId } });
-          // Payroll references User.driverId
           await prisma.payroll.deleteMany({ where: { driverId: driver.driverId } });
+          await prisma.orderDispute.deleteMany({ where: { driverId: driver.driverId } });
+          // No FK constraint but clean up anyway
+          await prisma.driverDocument.deleteMany({ where: { driverId: driver.driverId } });
+          await prisma.leaveRequest.deleteMany({ where: { driverId: driver.driverId } });
         }
-        
+
         // Finally delete the user
         await prisma.user.delete({ where: { id: driver.id } });
       });
@@ -262,6 +271,8 @@ export class DriverService {
         schedule: dto.schedule ?? undefined,
         status: dto.status ?? undefined,
         driverAvailableToday: dto.driverAvailableToday ?? undefined,
+        state: dto.state ?? undefined,
+        operatingType: dto.operatingType ?? undefined,
         insuranceNumber: dto.insuranceNumber ?? undefined,
         insuranceExpiry: dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : undefined,
         registrationNumber: dto.registrationNumber ?? undefined,
@@ -281,6 +292,8 @@ export class DriverService {
         schedule: true,
         status: true,
         driverAvailableToday: true,
+        state: true,
+        operatingType: true,
         insuranceNumber: true,
         insuranceExpiry: true,
         registrationNumber: true,

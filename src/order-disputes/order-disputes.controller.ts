@@ -85,7 +85,7 @@ export class OrderDisputesController {
     @Param('driverId', ParseIntPipe) driverId: number,
     @Req() req: any,
   ) {
-    if (req.user.role !== 1 && req.user.role !== 3 && req.user.driverId !== driverId) {
+    if (req.user.role !== 1 && req.user.role !== 3 && req.user.role !== 4 && req.user.driverId !== driverId) {
       throw new ForbiddenException();
     }
     return this.service.getMetrics(driverId);
@@ -97,7 +97,7 @@ export class OrderDisputesController {
     @Param('driverId', ParseIntPipe) driverId: number,
     @Req() req: any,
   ) {
-    if (req.user.role !== 1 && req.user.role !== 3 && req.user.driverId !== driverId) {
+    if (req.user.role !== 1 && req.user.role !== 3 && req.user.role !== 4 && req.user.driverId !== driverId) {
       throw new ForbiddenException();
     }
     return this.service.getByDriver(driverId);
