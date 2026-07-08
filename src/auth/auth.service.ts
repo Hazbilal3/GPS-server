@@ -10,7 +10,7 @@ import {
 import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from 'src/prisma.service';
-import * as nodemailer from 'nodemailer';
+import { MailService } from '../mail/mail.service';
 
 import { LoginDto } from 'src/user/dto/login.dto';
 import { RegisterDto } from 'src/user/dto/register.dto';
@@ -22,27 +22,11 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
-  private transporter: nodemailer.Transporter;
-
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
-  ) {
-    // Build transporter from env
-    const host = process.env.SMTP_HOST;
-    const port = Number(process.env.SMTP_PORT ?? 587);
-    const secure = (process.env.SMTP_SECURE ?? '') === 'true' || port === 465; // 465 = SMTPS
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
-
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: user && pass ? { user, pass } : undefined,
-      tls: { rejectUnauthorized: false },
-    });
-  }
+    private mail: MailService,
+  ) {}
 
   // ===== helpers =====
   private maskEmail(email: string | null) {
@@ -66,16 +50,7 @@ export class AuthService {
     subject?: string,
     bodyHtml?: string,
   ) {
-    const appName = process.env.APP_NAME || 'Our App';
-
-    const from =
-      process.env.MAIL_FROM ||
-      `"${appName} (no-reply)" <no-reply@${process.env.MAIL_DOMAIN || 'example.com'}>`;
-
-    const replyTo =
-      process.env.MAIL_REPLY_TO ||
-      `no-reply@${process.env.MAIL_DOMAIN || 'example.com'}`;
-
+    const appName = process.env.APP_NAME || 'CMJL';
     const finalSubject = subject ?? `${appName} verification code: ${code}`;
     const finalHtml = bodyHtml ?? `
     <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6">
@@ -85,18 +60,9 @@ export class AuthService {
       <p>If you didn't request this, you can safely ignore this email.</p>
     </div>
   `;
-
     try {
-      const info = await this.transporter.sendMail({
-        from,
-        to,
-        subject: finalSubject,
-        text: `Your verification code is ${code}. It expires in 10 minutes.`,
-        html: finalHtml,
-      });
-      return info.messageId;
+      await this.mail.send(to, finalSubject, finalHtml, `Your verification code is ${code}. It expires in 10 minutes.`);
     } catch (error) {
-      console.error('Nodemailer Error:', error);
       throw new InternalServerErrorException('Failed to send email');
     }
   }

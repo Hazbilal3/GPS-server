@@ -1,30 +1,16 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
-import * as nodemailer from 'nodemailer';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class PoolService {
-  private transporter: nodemailer.Transporter;
-
-  constructor(private prisma: PrismaService) {
-    this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT ?? 587),
-      secure: (process.env.SMTP_SECURE ?? '') === 'true' || Number(process.env.SMTP_PORT) === 465,
-      auth:
-        process.env.SMTP_USER && process.env.SMTP_PASS
-          ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-          : undefined,
-      tls: { minVersion: 'TLSv1.2' },
-    });
-  }
+  constructor(
+    private prisma: PrismaService,
+    private mail: MailService,
+  ) {}
 
   private async sendApprovalEmail(to: string, fullName: string, driverId: number) {
     const appName = process.env.APP_NAME || 'CMJL';
-    const from =
-      process.env.MAIL_FROM ||
-      `"${appName} (no-reply)" <no-reply@${process.env.MAIL_DOMAIN || 'example.com'}>`;
-
     const html = `
       <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6">
         <p>Hi <strong>${fullName}</strong>,</p>
@@ -36,15 +22,13 @@ export class PoolService {
         <p style="color:#64748b;font-size:12px">— ${appName} Team</p>
       </div>
     `;
-
     try {
-      await this.transporter.sendMail({
-        from,
+      await this.mail.send(
         to,
-        subject: `Your ${appName} Driver Account is Approved — Driver ID: ${driverId}`,
-        text: `Hi ${fullName}, your driver account has been approved. Your Driver ID is: ${driverId}. Use this to log in to the driver portal.`,
+        `Your ${appName} Driver Account is Approved — Driver ID: ${driverId}`,
         html,
-      });
+        `Hi ${fullName}, your driver account has been approved. Your Driver ID is: ${driverId}. Use this to log in to the driver portal.`,
+      );
     } catch (err) {
       console.error('[PoolService] Failed to send approval email:', err);
     }
@@ -264,10 +248,6 @@ export class PoolService {
 
   private async sendRejectionEmail(to: string, fullName: string) {
     const appName = process.env.APP_NAME || 'CMJL';
-    const from =
-      process.env.MAIL_FROM ||
-      `"${appName} (no-reply)" <no-reply@${process.env.MAIL_DOMAIN || 'example.com'}>`;
-
     const html = `
       <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6">
         <p>Hi <strong>${fullName}</strong>,</p>
@@ -277,15 +257,13 @@ export class PoolService {
         <p style="color:#64748b;font-size:12px">— ${appName} Team</p>
       </div>
     `;
-
     try {
-      await this.transporter.sendMail({
-        from,
+      await this.mail.send(
         to,
-        subject: `Your ${appName} Driver Application Status`,
-        text: `Hi ${fullName}, your driver verification application has been rejected. Please contact support for more information.`,
+        `Your ${appName} Driver Application Status`,
         html,
-      });
+        `Hi ${fullName}, your driver verification application has been rejected. Please contact support for more information.`,
+      );
     } catch (err) {
       console.error('[PoolService] Failed to send rejection email:', err);
     }

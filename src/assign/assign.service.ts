@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { PushService } from '../push/push.service';
-import * as nodemailer from 'nodemailer';
+import { MailService } from '../mail/mail.service';
 
 interface AssignmentRow {
   driverId: number;
@@ -11,34 +11,12 @@ interface AssignmentRow {
 @Injectable()
 export class AssignService {
   private readonly logger = new Logger(AssignService.name);
-  private transporter: nodemailer.Transporter;
 
   constructor(
     private prisma: PrismaService,
     private push: PushService,
-  ) {
-    const host = process.env.SMTP_HOST;
-    const port = Number(process.env.SMTP_PORT ?? 587);
-    const secure = (process.env.SMTP_SECURE ?? '') === 'true' || port === 465;
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
-
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: user && pass ? { user, pass } : undefined,
-      tls: { minVersion: 'TLSv1.2' },
-    });
-  }
-
-  private get from(): string {
-    const appName = process.env.APP_NAME || 'GPS';
-    return (
-      process.env.MAIL_FROM ||
-      `"${appName}" <no-reply@${process.env.MAIL_DOMAIN || 'example.com'}>`
-    );
-  }
+    private mail: MailService,
+  ) {}
 
   async sendAssignments(assignments: AssignmentRow[]): Promise<void> {
     const adminEmail = 'ets.routes@gmail.com';
@@ -81,14 +59,13 @@ export class AssignService {
             <p style="margin-top:28px;color:#6c757d;font-size:12px">${appName} · Route Assignment</p>
           </div>`;
 
-        await this.transporter
-          .sendMail({
-            from: this.from,
-            to: driver.email,
-            subject: `Your Route Assignment for ${today} — ${appName}`,
+        await this.mail
+          .send(
+            driver.email,
+            `Your Route Assignment for ${today} — ${appName}`,
             html,
-            text: `Hi ${driver.fullName}, you have been assigned the following routes for ${today}: ${routeList}.`,
-          })
+            `Hi ${driver.fullName}, you have been assigned the following routes for ${today}: ${routeList}.`,
+          )
           .catch((err) =>
             this.logger.error(`Driver email failed for ${driver.email}`, err),
           );
@@ -134,14 +111,13 @@ export class AssignService {
         <p style="margin-top:28px;color:#6c757d;font-size:12px">${appName} · Route Assignment Summary</p>
       </div>`;
 
-    await this.transporter
-      .sendMail({
-        from: this.from,
-        to: adminEmail,
-        subject: `Route Assignment Summary — ${today}`,
-        html: adminHtml,
-        text: `Daily Route Assignments (${today}):\n\n${summaryTextLines.join('\n')}`,
-      })
+    await this.mail
+      .send(
+        adminEmail,
+        `Route Assignment Summary — ${today}`,
+        adminHtml,
+        `Daily Route Assignments (${today}):\n\n${summaryTextLines.join('\n')}`,
+      )
       .catch((err) => this.logger.error('Admin summary email failed', err));
   }
 
