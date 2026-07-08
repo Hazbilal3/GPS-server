@@ -28,7 +28,7 @@ export class SpecialOrdersService {
     });
 
     // Send push notifications to target drivers
-    this.sendOrderNotification(order.id, body.routeName, body.targetType, body.targetDriverIds);
+    this.sendOrderNotification(order.id, body.routeName, body.stops, body.price, body.targetType, body.targetDriverIds);
 
     return order;
   }
@@ -36,6 +36,8 @@ export class SpecialOrdersService {
   private async sendOrderNotification(
     orderId: number,
     routeName: string,
+    stops: number,
+    price: number,
     targetType: 'specific' | 'all',
     targetDriverIds?: number[],
   ) {
@@ -51,7 +53,7 @@ export class SpecialOrdersService {
       await this.push.sendToMany(
         tokens,
         'New Special Order',
-        `A new delivery order is available: ${routeName}`,
+        `Route: ${routeName} | Stops: ${stops} | Pay: $${price}`,
         { type: 'new_order', orderId },
       );
     } catch (_) {}

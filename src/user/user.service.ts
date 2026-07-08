@@ -76,27 +76,27 @@ export class DriverService {
         await prisma.driverPool.deleteMany({ where: { userId: driver.id } });
 
         if (driver.driverId !== null) {
-          // Fetch document file paths before deleting DB records so we can remove files from disk
+          // Fetch document file paths before deleting DB records so we can remove files from disk.
+          // DriverDocument now stores User.id (immutable) — use driver.id here.
           const docs = await prisma.driverDocument.findMany({
-            where: { driverId: driver.driverId },
-            select: { fileUrl: true },
+            where: { driverId: driver.id },
+            select: { storedName: true },
           });
 
-          // These all reference User.driverId (FK)
+          // These all reference User.driverId (mutable number)
           await prisma.upload.deleteMany({ where: { driverId: driver.driverId } });
           await prisma.dispute.deleteMany({ where: { driverId: driver.driverId } });
           await prisma.payroll.deleteMany({ where: { driverId: driver.driverId } });
           await prisma.orderDispute.deleteMany({ where: { driverId: driver.driverId } });
-          await prisma.driverDocument.deleteMany({ where: { driverId: driver.driverId } });
           await prisma.leaveRequest.deleteMany({ where: { driverId: driver.driverId } });
 
-          // Delete physical files from disk after DB records are removed
+          // DriverDocument uses User.id — delete by driver.id
+          await prisma.driverDocument.deleteMany({ where: { driverId: driver.id } });
+
+          // Delete physical document files from disk after DB records are removed
           for (const doc of docs) {
             try {
-              const filename = doc.fileUrl.split('/').pop();
-              if (!filename) continue;
-              // Pool compliance docs live in uploads/pool-docs/
-              const filePath = path.join(process.cwd(), 'uploads', 'pool-docs', filename);
+              const filePath = path.join(process.cwd(), 'uploads', 'driver-documents', doc.storedName);
               if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
             } catch { /* ignore individual file errors */ }
           }

@@ -1,23 +1,55 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
 @Injectable()
-export class DriverDocumentsService {
+export class DriverDocumentsService implements OnModuleInit {
   constructor(private prisma: PrismaService) {}
 
+  /**
+   * One-time migration: DriverDocument rows previously stored User.driverId
+   * (the mutable 4-digit number). This converts them to store User.id
+   * (the immutable autoincrement PK) so reassigning a driverId never leaks
+   * documents to a new driver. Safe to run on every restart — rows already
+   * storing User.id won't match any User.driverId and are untouched.
+   */
+  async onModuleInit() {
+    const users = await this.prisma.user.findMany({
+      where: { driverId: { not: null } },
+      select: { id: true, driverId: true },
+    });
+    for (const user of users) {
+      if (user.driverId !== null) {
+        await this.prisma.driverDocument.updateMany({
+          where: { driverId: user.driverId },
+          data: { driverId: user.id },
+        });
+      }
+    }
+  }
+
   async getDocuments(driverId: number) {
-    return this.prisma.driverDocument.findMany({
+    const user = await this.prisma.user.findFirst({
       where: { driverId },
+      select: { id: true },
+    });
+    if (!user) return [];
+    return this.prisma.driverDocument.findMany({
+      where: { driverId: user.id },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async createDocument(driverId: number, file: Express.Multer.File, description: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { driverId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException(`Driver with driverId ${driverId} not found`);
     return this.prisma.driverDocument.create({
       data: {
-        driverId,
+        driverId: user.id,
         fileName: file.originalname,
         storedName: file.filename,
         description,

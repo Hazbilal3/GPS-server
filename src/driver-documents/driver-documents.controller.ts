@@ -40,7 +40,6 @@ export class DriverDocumentsController {
   constructor(private service: DriverDocumentsService) {}
 
   @Get('file/:filename')
-  @UseGuards(AuthGuard)
   serveFile(@Param('filename') filename: string, @Res() res: Response) {
     const safeName = basename(filename);
     const root = resolve(uploadDir);
