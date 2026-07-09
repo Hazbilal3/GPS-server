@@ -9,6 +9,18 @@ export class NotificationsService {
     private push: PushService,
   ) {}
 
+  async getTemplates() {
+    return this.prisma.notificationTemplate.findMany({ orderBy: { createdAt: 'desc' } });
+  }
+
+  async createTemplate(name: string, title: string, message: string) {
+    return this.prisma.notificationTemplate.create({ data: { name, title, message } });
+  }
+
+  async deleteTemplate(id: number) {
+    return this.prisma.notificationTemplate.delete({ where: { id } });
+  }
+
   async broadcast(title: string, body: string, driverIds?: number[]) {
     const where = driverIds && driverIds.length > 0
       ? { driverId: { in: driverIds }, pushToken: { not: null } }
