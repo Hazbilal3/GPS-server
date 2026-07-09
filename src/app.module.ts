@@ -1,4 +1,5 @@
 import { UploadService } from 'src/upload/upload.service';
+import { PushService } from './push/push.service';
 import { UploadController } from './upload/upload.controller';
 import { ConfigModule } from '@nestjs/config';
 import { Module, ValidationPipe } from '@nestjs/common';
@@ -22,11 +23,15 @@ import { PayrollAdjustmentModule } from './payroll-adjustment/payroll-adjustment
 import { DriverScheduleModule } from './driver-schedule/driver-schedule.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PoolModule } from './pool/pool.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]),
+    NotificationsModule,
     AuthModule,
     DisputeModule,
     SpecialOrdersModule,
@@ -48,6 +53,7 @@ import { PoolModule } from './pool/pool.module';
   providers: [
     UploadService,
     PrismaService,
+    PushService,
     ReportService,
     DriverService,
     AirtableService,

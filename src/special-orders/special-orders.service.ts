@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma.service';
 import { Prisma } from '@prisma/client';
 import { PushService } from '../push/push.service';
+import { parseEstDate } from '../utils/date';
 
 @Injectable()
 export class SpecialOrdersService {
@@ -19,7 +20,7 @@ export class SpecialOrdersService {
       data: {
         routeName: body.routeName,
         stops: body.stops,
-        date: new Date(body.date),
+        date: parseEstDate(body.date),
         price: body.price,
         targetType: body.targetType,
         targetDriverIds: body.targetDriverIds ?? Prisma.JsonNull,
@@ -52,8 +53,8 @@ export class SpecialOrdersService {
 
       await this.push.sendToMany(
         tokens,
-        'New Special Order',
-        `Route: ${routeName} | Stops: ${stops} | Pay: $${price}`,
+        'Route Available',
+        `${routeName} | ${stops} Stop${stops !== 1 ? 's' : ''} | $${price}`,
         { type: 'new_order', orderId },
       );
     } catch (_) {}

@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../prisma.service';
 import { CreateDriverDto, UpdateDriverDto } from './user.entity';
 import * as bcrypt from 'bcryptjs';
+import { deleteS3File } from '../s3.storage';
 import * as fs from 'fs';
 import * as path from 'path';
 @Injectable()
@@ -80,7 +81,7 @@ export class DriverService {
           // DriverDocument now stores User.id (immutable) — use driver.id here.
           const docs = await prisma.driverDocument.findMany({
             where: { driverId: driver.id },
-            select: { storedName: true },
+            select: { storedName: true, fileUrl: true },
           });
 
           // These all reference User.driverId (mutable number)
@@ -93,11 +94,14 @@ export class DriverService {
           // DriverDocument uses User.id — delete by driver.id
           await prisma.driverDocument.deleteMany({ where: { driverId: driver.id } });
 
-          // Delete physical document files from disk after DB records are removed
           for (const doc of docs) {
             try {
-              const filePath = path.join(process.cwd(), 'uploads', 'driver-documents', doc.storedName);
-              if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+              if (doc.fileUrl?.startsWith('https://')) {
+                await deleteS3File(doc.storedName);
+              } else {
+                const filePath = path.join(process.cwd(), 'uploads', 'driver-documents', doc.storedName);
+                if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+              }
             } catch { /* ignore individual file errors */ }
           }
         }

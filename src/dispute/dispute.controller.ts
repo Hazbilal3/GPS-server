@@ -15,25 +15,15 @@ import {
 } from '@nestjs/common';
 import { DisputeService } from './dispute.service';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { extname, basename, resolve, join } from 'path';
-import { diskStorage } from 'multer';
+import { basename, resolve, join } from 'path';
 import type { Response } from 'express';
 import * as fs from 'fs';
 import { AuthGuard } from '../auth/auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
+import { createS3Storage, S3File } from '../s3.storage';
 
-const uploadDir = './uploads/disputes';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-export const disputeStorage = diskStorage({
-  destination: uploadDir,
-  filename: (req, file, cb) => {
-    const randomName = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, `${randomName}${extname(file.originalname)}`);
-  },
-});
+const localUploadDir = './uploads/disputes';
+export const disputeStorage = createS3Storage('disputes');
 
 @Controller('disputes')
 export class DisputeController {
@@ -43,7 +33,7 @@ export class DisputeController {
   @UseGuards(AuthGuard)
   async getFile(@Param('filename') filename: string, @Res() res: Response) {
     const safeName = basename(filename);
-    const root = resolve(uploadDir);
+    const root = resolve(localUploadDir);
     const fullPath = join(root, safeName);
     if (!fullPath.startsWith(root)) throw new ForbiddenException();
     return res.sendFile(fullPath);
@@ -60,7 +50,7 @@ export class DisputeController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const driverId = parseInt(driverIdRaw, 10);
-    const attachmentUrl = file ? `/disputes/file/${file.filename}` : undefined;
+    const attachmentUrl = file ? ((file as S3File).location || `/disputes/file/${file.filename}`) : undefined;
     return this.disputeService.createDispute(
       driverId,
       driverName,
@@ -105,7 +95,7 @@ export class DisputeController {
     @Body('content') content: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const attachmentUrl = file ? `/disputes/file/${file.filename}` : undefined;
+    const attachmentUrl = file ? ((file as S3File).location || `/disputes/file/${file.filename}`) : undefined;
     return this.disputeService.addMessage(id, senderRole, senderName, content, attachmentUrl);
   }
 

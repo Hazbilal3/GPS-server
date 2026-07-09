@@ -16,25 +16,14 @@ import {
 } from '@nestjs/common';
 import { OrderDisputesService } from './order-disputes.service';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { extname, basename, resolve, join } from 'path';
-import { diskStorage } from 'multer';
+import { basename, resolve, join } from 'path';
 import type { Response } from 'express';
-import * as fs from 'fs';
 import { AuthGuard } from '../auth/auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
+import { createS3Storage, S3File } from '../s3.storage';
 
-const uploadDir = './uploads/order-disputes';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const orderDisputeStorage = diskStorage({
-  destination: uploadDir,
-  filename: (req, file, cb) => {
-    const randomName = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, `${randomName}${extname(file.originalname)}`);
-  },
-});
+const localUploadDir = './uploads/order-disputes';
+const orderDisputeStorage = createS3Storage('order-disputes');
 
 @Controller('order-disputes')
 export class OrderDisputesController {
@@ -43,7 +32,7 @@ export class OrderDisputesController {
   @Get('file/:filename')
   getFile(@Param('filename') filename: string, @Res() res: Response) {
     const safeName = basename(filename);
-    const root = resolve(uploadDir);
+    const root = resolve(localUploadDir);
     const fullPath = join(root, safeName);
     if (!fullPath.startsWith(root)) throw new ForbiddenException();
     return res.sendFile(fullPath);
@@ -61,7 +50,7 @@ export class OrderDisputesController {
     @Body('deliveredLocation') deliveredLocation: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const imageUrl = file ? `/order-disputes/file/${file.filename}` : undefined;
+    const imageUrl = file ? ((file as S3File).location || `/order-disputes/file/${file.filename}`) : undefined;
     return this.service.create({
       driverId: parseInt(driverIdRaw, 10),
       driverName,
@@ -114,7 +103,7 @@ export class OrderDisputesController {
     @Body('deliveredLocation') deliveredLocation?: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const imageUrl = file ? `/order-disputes/file/${file.filename}` : undefined;
+    const imageUrl = file ? ((file as S3File).location || `/order-disputes/file/${file.filename}`) : undefined;
     return this.service.update(id, {
       date,
       orderNumber,

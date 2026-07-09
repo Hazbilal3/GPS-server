@@ -16,25 +16,14 @@ import {
 } from '@nestjs/common';
 import { PoolService } from './pool.service';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { extname, basename, resolve, join } from 'path';
-import { diskStorage } from 'multer';
+import { basename, resolve, join } from 'path';
 import type { Response } from 'express';
-import * as fs from 'fs';
 import { AuthGuard } from '../auth/auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
+import { createS3Storage, S3File } from '../s3.storage';
 
-const uploadDir = './uploads/pool-docs';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const poolDocStorage = diskStorage({
-  destination: uploadDir,
-  filename: (req, file, cb) => {
-    const randomName = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, `${randomName}${extname(file.originalname)}`);
-  },
-});
+const localUploadDir = './uploads/pool-docs';
+const poolDocStorage = createS3Storage('pool-docs');
 
 @Controller('pool')
 export class PoolController {
@@ -43,7 +32,7 @@ export class PoolController {
   @Get('file/:filename')
   getFile(@Param('filename') filename: string, @Res() res: Response) {
     const safeName = basename(filename);
-    const root = resolve(uploadDir);
+    const root = resolve(localUploadDir);
     const fullPath = join(root, safeName);
     if (!fullPath.startsWith(root)) throw new ForbiddenException();
     return res.sendFile(fullPath);
@@ -57,7 +46,7 @@ export class PoolController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('Document file is required.');
-    const docUrl = `/pool/file/${file.filename}`;
+    const docUrl = (file as S3File).location || `/pool/file/${file.filename}`;
     return this.service.submitDocument(req.user.sub, docUrl);
   }
 
@@ -73,7 +62,7 @@ export class PoolController {
     if (!file) throw new BadRequestException('Insurance document is required.');
     if (!number) throw new BadRequestException('Insurance number is required.');
     if (!expiry) throw new BadRequestException('Insurance expiry is required.');
-    return this.service.submitCard(req.user.sub, 'insurance', { number, expiry, docUrl: `/pool/file/${file.filename}` });
+    return this.service.submitCard(req.user.sub, 'insurance', { number, expiry, docUrl: (file as S3File).location || `/pool/file/${file.filename}` });
   }
 
   @Post('submit-registration')
@@ -88,7 +77,7 @@ export class PoolController {
     if (!file) throw new BadRequestException('Registration document is required.');
     if (!number) throw new BadRequestException('Registration number is required.');
     if (!expiry) throw new BadRequestException('Registration expiry is required.');
-    return this.service.submitCard(req.user.sub, 'registration', { number, expiry, docUrl: `/pool/file/${file.filename}` });
+    return this.service.submitCard(req.user.sub, 'registration', { number, expiry, docUrl: (file as S3File).location || `/pool/file/${file.filename}` });
   }
 
   @Post('submit-license')
@@ -103,7 +92,7 @@ export class PoolController {
     if (!file) throw new BadRequestException('License document is required.');
     if (!number) throw new BadRequestException('License number is required.');
     if (!expiry) throw new BadRequestException('License expiry is required.');
-    return this.service.submitCard(req.user.sub, 'license', { number, expiry, docUrl: `/pool/file/${file.filename}` });
+    return this.service.submitCard(req.user.sub, 'license', { number, expiry, docUrl: (file as S3File).location || `/pool/file/${file.filename}` });
   }
 
   @Get('my-status')

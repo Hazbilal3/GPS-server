@@ -11,6 +11,7 @@ import {
 import * as XLSX from 'xlsx';
 import { PrismaService } from 'src/prisma.service';
 import { Prisma, User } from '@prisma/client';
+import { PushService } from '../push/push.service';
 
 
 // [NEW HELPER]
@@ -141,7 +142,10 @@ export class UploadService {
   private routeCache: { data: any[]; expiresAt: number } | null = null;
   private readonly ROUTE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+  ) {}
 
   async processExcel(
     file: Express.Multer.File,
@@ -661,8 +665,9 @@ const driverUploads = await prisma.upload.findMany({
         totalBonus: true,
         netPay: true,
         remarks: true,
-        zipBreakdown: true, // <-- Explicitly select zipBreakdown
-      },
+        zipBreakdown: true,
+        paymentStatus: true,
+      } as any,
       orderBy: {
         weekNumber: 'desc',
       },
@@ -705,7 +710,9 @@ const driverUploads = await prisma.upload.findMany({
         netPay: r.netPay,
         remarks: (r as any).remarks || '',
         bonusRemarks: (r as any).bonusRemarks || '',
-        zipBreakdown: r.zipBreakdown ?? [], // <-- This line should now work
+        zipBreakdown: r.zipBreakdown ?? [],
+        payrollId: (r as any).id,
+        paymentStatus: (r as any).paymentStatus || 'unpaid',
       })),
     }));
 
@@ -723,6 +730,7 @@ const driverUploads = await prisma.upload.findMany({
       },
       // --- FIX: Add select to ensure all fields are returned ---
       select: {
+        id: true,
         weekNumber: true,
         payPeriod: true,
         salaryType: true,
@@ -733,8 +741,9 @@ const driverUploads = await prisma.upload.findMany({
         netPay: true,
         remarks: true,
         bonusRemarks: true,
-        zipBreakdown: true, // <-- Explicitly select zipBreakdown
-      },
+        zipBreakdown: true,
+        paymentStatus: true,
+      } as any,
     });
 
     if (!driverPayroll) {
@@ -753,8 +762,34 @@ const driverUploads = await prisma.upload.findMany({
       netPay: record.netPay,
       remarks: record.remarks,
       bonusRemarks: (record as any).bonusRemarks || '',
-      zipBreakdown: record.zipBreakdown ?? [], // <-- FIX: Return the zipBreakdown
+      zipBreakdown: record.zipBreakdown ?? [],
+      payrollId: (record as any).id,
+      paymentStatus: (record as any).paymentStatus || 'unpaid',
     }));
+  }
+
+  async updatePaymentStatus(payrollId: number, status: string) {
+    const updated = await this.prisma.payroll.update({
+      where: { id: payrollId },
+      data: { paymentStatus: status } as any,
+      select: { id: true, paymentStatus: true, driverId: true, weekNumber: true } as any,
+    }) as any;
+
+    if (status === 'paid') {
+      const user = await (this.prisma.user as any).findFirst({
+        where: { driverId: updated.driverId },
+        select: { pushToken: true },
+      });
+      if (user?.pushToken) {
+        await this.push.sendToMany(
+          [user.pushToken],
+          'Payroll Paid',
+          `Your payroll for week ${updated.weekNumber} has been marked as paid.`,
+        );
+      }
+    }
+
+    return { id: updated.id, paymentStatus: updated.paymentStatus };
   }
 
   /**

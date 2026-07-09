@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { deleteS3File, S3File } from '../s3.storage';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -47,13 +48,16 @@ export class DriverDocumentsService implements OnModuleInit {
       select: { id: true },
     });
     if (!user) throw new NotFoundException(`Driver with driverId ${driverId} not found`);
+    const s3File = file as S3File;
+    const fileUrl = s3File.location || `/driver-documents/file/${file.filename}`;
+    const storedName = s3File.key || file.filename;
     return this.prisma.driverDocument.create({
       data: {
         driverId: user.id,
         fileName: file.originalname,
-        storedName: file.filename,
+        storedName,
         description,
-        fileUrl: `/driver-documents/file/${file.filename}`,
+        fileUrl,
       },
     });
   }
@@ -62,8 +66,12 @@ export class DriverDocumentsService implements OnModuleInit {
     const doc = await this.prisma.driverDocument.findUnique({ where: { id } });
     if (!doc) throw new NotFoundException(`Document ${id} not found`);
 
-    const filePath = path.join('./uploads/driver-documents', doc.storedName);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    if (doc.fileUrl?.startsWith('https://')) {
+      await deleteS3File(doc.storedName);
+    } else {
+      const filePath = path.join('./uploads/driver-documents', doc.storedName);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
 
     return this.prisma.driverDocument.delete({ where: { id } });
   }

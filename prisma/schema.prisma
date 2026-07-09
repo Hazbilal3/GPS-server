@@ -46,6 +46,7 @@ model User {
   emailOtpExpiresAt    DateTime?
   poolStatus           String?   // null | "pending" | "approved" | "rejected"
   poolEntry            DriverPool?
+  tokenExpiresAt       DateTime?
 }
 
 model Upload {
@@ -106,6 +107,7 @@ model Payroll {
   netPay          Float
   remarks         String?
   bonusRemarks    String?
+  paymentStatus   String   @default("unpaid")
   createdAt       DateTime @default(now())
 
   driver User @relation(fields: [driverId], references: [driverId])

@@ -1,7 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma.service';
 import { PushService } from '../push/push.service';
+import { deleteS3File } from '../s3.storage';
 import * as fs from 'fs';
+import { parseEstDate } from '../utils/date';
 import * as path from 'path';
 
 @Injectable()
@@ -24,7 +26,7 @@ export class OrderDisputesService {
       data: {
         driverId: data.driverId,
         driverName: data.driverName,
-        date: new Date(data.date),
+        date: parseEstDate(data.date),
         orderNumber: data.orderNumber,
         expectedLocation: data.expectedLocation,
         deliveredLocation: data.deliveredLocation,
@@ -141,12 +143,15 @@ export class OrderDisputesService {
     const existing = await this.prisma.orderDispute.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException(`Order dispute ${id} not found`);
 
-    // Remove image file if present
     if (existing.imageUrl) {
-      const filename = existing.imageUrl.split('/').pop();
-      if (filename) {
-        const filePath = path.join('./uploads/order-disputes', filename);
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      if (existing.imageUrl.startsWith('https://')) {
+        await deleteS3File(existing.imageUrl);
+      } else {
+        const filename = existing.imageUrl.split('/').pop();
+        if (filename) {
+          const filePath = path.join('./uploads/order-disputes', filename);
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        }
       }
     }
 

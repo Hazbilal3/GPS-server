@@ -152,6 +152,14 @@ export class UploadController {
     return this.uploadService.updatePayrollBonus(body);
   }
 
+  @Patch('payroll/payment-status')
+  @UseGuards(AuthGuard, AdminGuard)
+  async updatePaymentStatus(
+    @Body() body: { payrollId: number; status: string },
+  ) {
+    return this.uploadService.updatePaymentStatus(body.payrollId, body.status);
+  }
+
   @Post('payroll/calculate')
   @UseGuards(AuthGuard, AdminGuard)
   async recalculateAllPayroll() {

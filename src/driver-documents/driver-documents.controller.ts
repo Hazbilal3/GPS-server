@@ -15,25 +15,15 @@ import {
 } from '@nestjs/common';
 import { DriverDocumentsService } from './driver-documents.service';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, basename, resolve, join } from 'path';
+import { basename, resolve, join } from 'path';
 import type { Response } from 'express';
 import * as fs from 'fs';
 import { AuthGuard } from '../auth/auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
+import { createS3Storage } from '../s3.storage';
 
-const uploadDir = './uploads/driver-documents';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const docStorage = diskStorage({
-  destination: uploadDir,
-  filename: (req, file, cb) => {
-    const randomName = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, `${randomName}${extname(file.originalname)}`);
-  },
-});
+const localUploadDir = './uploads/driver-documents';
+const docStorage = createS3Storage('driver-documents');
 
 @Controller('driver-documents')
 export class DriverDocumentsController {
@@ -42,7 +32,7 @@ export class DriverDocumentsController {
   @Get('file/:filename')
   serveFile(@Param('filename') filename: string, @Res() res: Response) {
     const safeName = basename(filename);
-    const root = resolve(uploadDir);
+    const root = resolve(localUploadDir);
     const fullPath = join(root, safeName);
     if (!fullPath.startsWith(root)) throw new ForbiddenException();
     return res.sendFile(fullPath);
