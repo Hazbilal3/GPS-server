@@ -27,7 +27,7 @@ export function createS3Storage(folder: string) {
     contentType: multerS3.AUTO_CONTENT_TYPE,
     key: (_req: any, file: Express.Multer.File, cb: (err: any, key: string) => void) => {
       const name = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      cb(null, `${folder}/${name}${extname(file.originalname)}`);
+      cb(null, `${folder}/${name}${extname(file.originalname || '') || '.jpg'}`);
     },
   });
 }
