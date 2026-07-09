@@ -22,7 +22,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
 import { createS3Storage, S3File } from '../s3.storage';
 
-const localUploadDir = './uploads/pool-docs';
+const localUploadDir = join(__dirname, '../../uploads/pool-docs');
 const poolDocStorage = createS3Storage('pool-docs');
 
 @Controller('pool')

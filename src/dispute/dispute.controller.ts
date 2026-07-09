@@ -22,7 +22,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
 import { createS3Storage, S3File } from '../s3.storage';
 
-const localUploadDir = './uploads/disputes';
+const localUploadDir = join(__dirname, '../../uploads/disputes');
 export const disputeStorage = createS3Storage('disputes');
 
 @Controller('disputes')

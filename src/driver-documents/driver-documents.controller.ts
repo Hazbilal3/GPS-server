@@ -22,7 +22,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
 import { createS3Storage } from '../s3.storage';
 
-const localUploadDir = './uploads/driver-documents';
+const localUploadDir = join(__dirname, '../../uploads/driver-documents');
 const docStorage = createS3Storage('driver-documents');
 
 @Controller('driver-documents')
