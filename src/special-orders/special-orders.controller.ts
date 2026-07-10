@@ -26,6 +26,7 @@ export class SpecialOrdersController {
       stops: number;
       date: string;
       price: number;
+      description?: string;
       targetType: 'specific' | 'all';
       targetDriverIds?: number[];
     },

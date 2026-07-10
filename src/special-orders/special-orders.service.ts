@@ -13,6 +13,7 @@ export class SpecialOrdersService {
     stops: number;
     date: string;
     price: number;
+    description?: string;
     targetType: 'specific' | 'all';
     targetDriverIds?: number[];
   }) {
@@ -22,6 +23,7 @@ export class SpecialOrdersService {
         stops: body.stops,
         date: parseEstDate(body.date),
         price: body.price,
+        description: body.description || null,
         targetType: body.targetType,
         targetDriverIds: body.targetDriverIds ?? Prisma.JsonNull,
         status: 'pending',
