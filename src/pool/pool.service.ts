@@ -215,8 +215,9 @@ export class PoolService {
       },
     });
 
-    // Replace any existing DriverDocument records for this driverId (handles reused IDs / orphaned records)
-    await this.prisma.driverDocument.deleteMany({ where: { driverId: assignedDriverId } });
+    // Replace any existing DriverDocument records — use DB user.id (not business driverId)
+    // so getDocuments() can find them correctly
+    await this.prisma.driverDocument.deleteMany({ where: { driverId: entry.userId } });
 
     const docs = [
       { name: 'Insurance', url: entry.insuranceDocUrl },
@@ -230,7 +231,7 @@ export class PoolService {
       const storedName = doc.url.split('/').pop() ?? doc.name;
       await this.prisma.driverDocument.create({
         data: {
-          driverId: assignedDriverId,
+          driverId: entry.userId,
           fileName: storedName,
           storedName,
           description: doc.name,
