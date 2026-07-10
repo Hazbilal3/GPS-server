@@ -9,12 +9,16 @@ import {
   Patch,
   Post,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { DriverService } from './user.service';
 import { CreateDriverDto, UpdateDriverDto } from './user.entity';
 import { AuthGuard } from '../auth/auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
+import { createS3Storage } from '../s3.storage';
 
 @Controller('drivers')
 export class DriverController {
@@ -43,6 +47,19 @@ export class DriverController {
   @UseGuards(AuthGuard, AdminGuard)
   create(@Body() dto: CreateDriverDto) {
     return this.driverService.createDriver(dto);
+  }
+
+  @Patch(':driverId/profile-image')
+  @UseGuards(AuthGuard)
+  @UseInterceptors(FileInterceptor('file', { storage: createS3Storage('profile-images') }))
+  uploadProfileImage(
+    @Req() req: any,
+    @Param('driverId', ParseIntPipe) driverId: number,
+    @UploadedFile() file: any,
+  ) {
+    if (req.user.role !== 1 && req.user.driverId !== driverId) throw new ForbiddenException();
+    const url: string = file?.location ?? file?.path ?? '';
+    return this.driverService.updateProfileImage(driverId, url);
   }
 
   @Patch(':driverId/push-token')

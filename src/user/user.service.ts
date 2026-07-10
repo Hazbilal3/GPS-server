@@ -29,6 +29,7 @@ export class DriverService {
         schedule: true,
         state: true,
         operatingType: true,
+        profileImageUrl: true,
       },
     });
   }
@@ -54,6 +55,7 @@ export class DriverService {
         registrationExpiry: true,
         licenseNumber: true,
         licenseExpiry: true,
+        profileImageUrl: true,
       },
     });
   }
@@ -232,6 +234,13 @@ export class DriverService {
       message: 'Driver created successfully',
       driver: created,
     };
+  }
+
+  async updateProfileImage(driverId: number, url: string) {
+    const driver = await this.prisma.user.findFirst({ where: { driverId }, select: { id: true } });
+    if (!driver) throw new NotFoundException(`Driver ${driverId} not found`);
+    await this.prisma.user.update({ where: { id: driver.id }, data: { profileImageUrl: url } });
+    return { profileImageUrl: url };
   }
 
   async savePushToken(driverId: number, pushToken: string) {

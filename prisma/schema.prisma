@@ -47,6 +47,7 @@ model User {
   poolStatus           String?   // null | "pending" | "approved" | "rejected"
   poolEntry            DriverPool?
   tokenExpiresAt       DateTime?
+  profileImageUrl      String?
 }
 
 model Upload {
