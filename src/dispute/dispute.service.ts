@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma.service';
+import { PushService } from '../push/push.service';
 
 @Injectable()
 export class DisputeService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private push: PushService) {}
 
   // Driver submits a new dispute
   async createDispute(driverId: number, driverName: string, title: string, content: string, attachmentUrl?: string) {
@@ -77,6 +78,24 @@ export class DisputeService {
         status: senderRole === 'driver' ? 'open' : dispute.status,
       },
     });
+
+    // Notify driver when admin sends a message
+    if (senderRole === 'admin') {
+      try {
+        const driver = await this.prisma.user.findFirst({
+          where: { id: dispute.driverId },
+          select: { pushToken: true },
+        });
+        if (driver?.pushToken) {
+          await this.push.sendToMany(
+            [driver.pushToken],
+            'New message from support',
+            content.length > 80 ? content.slice(0, 77) + '…' : content,
+            { type: 'support_message', disputeId },
+          );
+        }
+      } catch (_) {}
+    }
 
     return message;
   }
