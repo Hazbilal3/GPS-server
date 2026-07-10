@@ -83,7 +83,7 @@ export class DisputeService {
     if (senderRole === 'admin') {
       try {
         const driver = await this.prisma.user.findFirst({
-          where: { id: dispute.driverId },
+          where: { driverId: dispute.driverId },
           select: { pushToken: true },
         });
         if (driver?.pushToken) {
