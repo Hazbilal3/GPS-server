@@ -206,20 +206,36 @@ model LeaveRequest {
 }
 
 model SpecialOrder {
-  id              Int      @id @default(autoincrement())
+  id              Int                  @id @default(autoincrement())
   routeName       String
   stops           Int
   date            DateTime
   price           Float
   description     String?
-  status          String   @default("pending") // "pending" | "accepted" | "rejected"
-  targetType      String   // "specific" | "all"
-  targetDriverIds Json?    // array of driverIds e.g. [12345, 254306]
-  rejectedBy      Json?    // array of driverIds who rejected
+  status          String               @default("pending") // "pending" | "accepted" | "rejected"
+  targetType      String               // "specific" | "all"
+  targetDriverIds Json?                // array of driverIds e.g. [12345, 254306]
+  rejectedBy      Json?                // array of driverIds who rejected
   acceptedBy      Int?
   acceptedByName  String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  earning         SpecialOrderEarning?
+}
+
+model SpecialOrderEarning {
+  id             Int          @id @default(autoincrement())
+  specialOrderId Int          @unique
+  driverId       Int          // business driverId
+  weekNumber     Int
+  date           DateTime     // exact date of the special order
+  amount         Float
+  routeName      String
+  stops          Int
+  createdAt      DateTime     @default(now())
+  specialOrder   SpecialOrder @relation(fields: [specialOrderId], references: [id], onDelete: Cascade)
+
+  @@index([driverId, weekNumber])
 }
 
 model NotificationTemplate {

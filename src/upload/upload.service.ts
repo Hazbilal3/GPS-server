@@ -14,52 +14,7 @@ import { Prisma, User } from '@prisma/client';
 import { PushService } from '../push/push.service';
 
 
-// [NEW HELPER]
-// This is the standard ISO week calculation. We need it for our new functions.
-function getISOWeek(date: Date): number {
-  const tempDate = new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
-  );
-  // Set to Thursday of the same week
-  const dayNum = tempDate.getUTCDay() || 7;
-  tempDate.setUTCDate(tempDate.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(tempDate.getUTCFullYear(), 0, 1));
-  // Calculate week number
-  return Math.ceil(
-    ((tempDate.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
-  );
-}
-
-// [NEW HELPER]
-// This is the core logic for the Sat-Fri week.
-// It finds the Friday that *ends* the pay period for any given date.
-function getPayrollWeekKey(date: Date): {
-  key: number;
-  periodStart: Date;
-  periodEnd: Date;
-} {
-  const tempDate = new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
-  );
-  const dayNum = tempDate.getUTCDay(); // 0=Sun, 6=Sat
-
-  // Formula to find days to add to get to the next Friday
-  // If Sat (6), adds 6 days. If Fri (5), adds 0 days. If Sun (0), adds 5 days.
-  const daysToAdd = (5 - dayNum + 7) % 7;
-
-  const periodEnd = new Date(tempDate);
-  periodEnd.setUTCDate(tempDate.getUTCDate() + daysToAdd); // This is the Friday (end)
-
-  const periodStart = new Date(periodEnd);
-  periodStart.setUTCDate(periodEnd.getUTCDate() - 6); // This is the Saturday (start)
-
-  const year = periodEnd.getUTCFullYear();
-  const week = getISOWeek(periodEnd); // Get ISO week of the ending Friday
-
-  // Create a unique key: e.g., 202546
-  const key = year * 100 + week;
-  return { key, periodStart, periodEnd };
-}
+import { getPayrollWeekKey } from '../utils/payroll-week';
 
 // [REPLACE THIS FUNCTION]
 // We now group by the new 'weekKey' (e.g., 202546)
@@ -650,71 +605,76 @@ const driverUploads = await prisma.upload.findMany({
    * REWRITTEN: Get all payroll, now reads from the DB
    */
   async getDriverPayroll(): Promise<any[]> {
-    // --- FIX: Added explicit select to ensure zipBreakdown is fetched ---
-    const payrollData = await this.prisma.payroll.findMany({
-      select: {
-        id: true,
-        driverId: true,
-        driverName: true,
-        weekNumber: true,
-        payPeriod: true,
-        salaryType: true,
-        totalDeliveries: true,
-        amount: true,
-        totalDeduction: true,
-        totalBonus: true,
-        netPay: true,
-        remarks: true,
-        zipBreakdown: true,
-        paymentStatus: true,
-      } as any,
-      orderBy: {
-        weekNumber: 'desc',
-      },
-    });
+    const [payrollData, allEarnings] = await Promise.all([
+      this.prisma.payroll.findMany({
+        select: {
+          id: true, driverId: true, driverName: true, weekNumber: true,
+          payPeriod: true, salaryType: true, totalDeliveries: true,
+          amount: true, totalDeduction: true, totalBonus: true, netPay: true,
+          remarks: true, zipBreakdown: true, paymentStatus: true,
+        } as any,
+        orderBy: { weekNumber: 'desc' },
+      }),
+      (this.prisma as any).specialOrderEarning.findMany(),
+    ]);
 
-    // --- Group payroll by week (to match existing output format) ---
+    // Index earnings by "driverId|weekNumber"
+    const earningsByDriverWeek: Record<string, any[]> = {};
+    for (const e of allEarnings) {
+      const key = `${e.driverId}|${e.weekNumber}`;
+      if (!earningsByDriverWeek[key]) earningsByDriverWeek[key] = [];
+      earningsByDriverWeek[key].push(e);
+    }
+
     const groupedPayroll = Object.entries(
       payrollData.reduce((acc, record) => {
         const week = record.weekNumber;
         if (typeof week !== 'number') return acc;
         if (!acc[week]) acc[week] = [];
-        // The record now perfectly matches PayrollRecord, so this push is safe
-        acc[week].push(record as unknown as PayrollRecord); // Cast to PayrollRecord
+        acc[week].push(record as unknown as PayrollRecord);
         return acc;
       }, {} as Record<number, PayrollRecord[]>),
-    ).map(([weekNumber, records]) => ({
-      weekNumber: Number(weekNumber),
-      payPeriod: records[0]?.payPeriod || '',
-      totalStops: records.reduce((sum, r) => sum + (r.totalDeliveries || 0), 0),
-      subtotal: Number(
-        records.reduce((sum, r) => sum + (r.amount || 0), 0).toFixed(2),
-      ),
-      totalDeductions: Number(
-        records.reduce((sum, r) => sum + (r.totalDeduction || 0), 0).toFixed(2),
-      ),
-      totalBonuses: Number(
-        records.reduce((sum, r) => sum + ((r as any).totalBonus || 0), 0).toFixed(2),
-      ),
-      netPay: Number(
-        records.reduce((sum, r) => sum + (r.netPay || 0), 0).toFixed(2),
-      ),
-      drivers: records.map((r) => ({
-        driverId: r.driverId, // Pass driverId to frontend
-        driverName: r.driverName,
-        salaryType: r.salaryType,
-        totalStops: r.totalDeliveries,
-        subtotal: r.amount,
-        totalDeduction: r.totalDeduction,
-        totalBonus: (r as any).totalBonus || 0,
-        netPay: r.netPay,
-        remarks: (r as any).remarks || '',
-        bonusRemarks: (r as any).bonusRemarks || '',
-        zipBreakdown: r.zipBreakdown ?? [],
-        payrollId: (r as any).id,
-        paymentStatus: (r as any).paymentStatus || 'unpaid',
-      })),
-    }));
+    ).map(([weekNumber, records]) => {
+      const wn = Number(weekNumber);
+      const drivers = records.map((r) => {
+        const soEarnings = earningsByDriverWeek[`${r.driverId}|${wn}`] ?? [];
+        const soTotal = soEarnings.reduce((s: number, e: any) => s + e.amount, 0);
+        return {
+          driverId: r.driverId,
+          driverName: r.driverName,
+          salaryType: r.salaryType,
+          totalStops: r.totalDeliveries,
+          subtotal: Number(((r.amount || 0) + soTotal).toFixed(2)),
+          totalDeduction: r.totalDeduction,
+          totalBonus: (r as any).totalBonus || 0,
+          netPay: Number(((r.netPay || 0) + soTotal).toFixed(2)),
+          remarks: (r as any).remarks || '',
+          bonusRemarks: (r as any).bonusRemarks || '',
+          zipBreakdown: r.zipBreakdown ?? [],
+          specialOrders: soEarnings.map((e: any) => ({
+            id: e.id,
+            routeName: e.routeName,
+            stops: e.stops,
+            amount: e.amount,
+            date: e.date instanceof Date ? e.date.toISOString().slice(0, 10) : String(e.date).slice(0, 10),
+          })),
+          payrollId: (r as any).id,
+          paymentStatus: (r as any).paymentStatus || 'unpaid',
+        };
+      });
+
+      const soWeekTotal = drivers.reduce((s, d) => s + (d.specialOrders?.reduce((a: number, e: any) => a + e.amount, 0) ?? 0), 0);
+      return {
+        weekNumber: wn,
+        payPeriod: records[0]?.payPeriod || '',
+        totalStops: records.reduce((sum, r) => sum + (r.totalDeliveries || 0), 0),
+        subtotal: Number((records.reduce((sum, r) => sum + (r.amount || 0), 0) + soWeekTotal).toFixed(2)),
+        totalDeductions: Number(records.reduce((sum, r) => sum + (r.totalDeduction || 0), 0).toFixed(2)),
+        totalBonuses: Number(records.reduce((sum, r) => sum + ((r as any).totalBonus || 0), 0).toFixed(2)),
+        netPay: Number((records.reduce((sum, r) => sum + (r.netPay || 0), 0) + soWeekTotal).toFixed(2)),
+        drivers,
+      };
+    });
 
     return groupedPayroll;
   }
@@ -723,49 +683,54 @@ const driverUploads = await prisma.upload.findMany({
    * REWRITTEN: Get payroll by driver, now reads from the DB
    */
   async getPayrollByDriver(driverId: number): Promise<any[]> {
-    const driverPayroll = await this.prisma.payroll.findMany({
-      where: { driverId },
-      orderBy: {
-        weekNumber: 'desc',
-      },
-      // --- FIX: Add select to ensure all fields are returned ---
-      select: {
-        id: true,
-        weekNumber: true,
-        payPeriod: true,
-        salaryType: true,
-        stopsCompleted: true,
-        amount: true,
-        totalDeduction: true,
-        totalBonus: true,
-        netPay: true,
-        remarks: true,
-        bonusRemarks: true,
-        zipBreakdown: true,
-        paymentStatus: true,
-      } as any,
-    });
+    const [driverPayroll, earnings] = await Promise.all([
+      this.prisma.payroll.findMany({
+        where: { driverId },
+        orderBy: { weekNumber: 'desc' },
+        select: {
+          id: true, weekNumber: true, payPeriod: true, salaryType: true,
+          stopsCompleted: true, amount: true, totalDeduction: true,
+          totalBonus: true, netPay: true, remarks: true, bonusRemarks: true,
+          zipBreakdown: true, paymentStatus: true,
+        } as any,
+      }),
+      (this.prisma as any).specialOrderEarning.findMany({ where: { driverId } }),
+    ]);
 
-    if (!driverPayroll) {
-      return [];
+    if (!driverPayroll) return [];
+
+    const earningsByWeek: Record<number, any[]> = {};
+    for (const e of earnings) {
+      if (!earningsByWeek[e.weekNumber]) earningsByWeek[e.weekNumber] = [];
+      earningsByWeek[e.weekNumber].push(e);
     }
 
-    // Format to match old output (simplified)
-    return driverPayroll.map((record) => ({
-      weekNumber: record.weekNumber,
-      payPeriod: record.payPeriod,
-      salaryType: record.salaryType,
-      totalStops: record.stopsCompleted,
-      subtotal: record.amount,
-      totalDeduction: record.totalDeduction,
-      totalBonus: (record as any).totalBonus || 0,
-      netPay: record.netPay,
-      remarks: record.remarks,
-      bonusRemarks: (record as any).bonusRemarks || '',
-      zipBreakdown: record.zipBreakdown ?? [],
-      payrollId: (record as any).id,
-      paymentStatus: (record as any).paymentStatus || 'unpaid',
-    }));
+    return driverPayroll.map((record) => {
+      const soEarnings = earningsByWeek[record.weekNumber] ?? [];
+      const soTotal = soEarnings.reduce((s: number, e: any) => s + e.amount, 0);
+      return {
+        weekNumber: record.weekNumber,
+        payPeriod: record.payPeriod,
+        salaryType: record.salaryType,
+        totalStops: record.stopsCompleted,
+        subtotal: Number((Number(record.amount || 0) + soTotal).toFixed(2)),
+        totalDeduction: record.totalDeduction,
+        totalBonus: (record as any).totalBonus || 0,
+        netPay: Number((Number(record.netPay || 0) + soTotal).toFixed(2)),
+        remarks: record.remarks,
+        bonusRemarks: (record as any).bonusRemarks || '',
+        zipBreakdown: record.zipBreakdown ?? [],
+        specialOrders: soEarnings.map((e: any) => ({
+          id: e.id,
+          routeName: e.routeName,
+          stops: e.stops,
+          amount: e.amount,
+          date: e.date instanceof Date ? e.date.toISOString().slice(0, 10) : String(e.date).slice(0, 10),
+        })),
+        payrollId: (record as any).id,
+        paymentStatus: (record as any).paymentStatus || 'unpaid',
+      };
+    });
   }
 
   async updatePaymentStatus(payrollId: number, status: string) {
@@ -885,6 +850,11 @@ const driverUploads = await prisma.upload.findMany({
       }
     }
 
+    // 3b. Load special order earnings for relevant drivers
+    const soEarnings = await (this.prisma as any).specialOrderEarning.findMany({
+      where: { driverId: { in: driverIds } },
+    });
+
     // 4. Derive daily records from stored zipBreakdown
     const dailyRecords: {
       driverId: number;
@@ -898,6 +868,8 @@ const driverUploads = await prisma.upload.findMany({
       netPay: number;
       deductionReasons: string[];
       bonusReasons: string[];
+      isSpecialOrder?: boolean;
+      routeName?: string;
     }[] = [];
 
     for (const payroll of storedPayrolls) {
@@ -932,6 +904,29 @@ const driverUploads = await prisma.upload.findMany({
           bonusReasons: adj.bonusReasons,
         });
       }
+    }
+
+    // 5. Append special order earnings as distinct daily entries
+    for (const e of soEarnings) {
+      const driver = drivers.find((d) => d.driverId === e.driverId);
+      const dateStr = e.date instanceof Date
+        ? e.date.toISOString().slice(0, 10)
+        : String(e.date).slice(0, 10);
+      dailyRecords.push({
+        driverId: e.driverId,
+        driverName: driver?.fullName ?? null,
+        weekNumber: e.weekNumber,
+        date: dateStr,
+        totalStops: e.stops,
+        subtotal: e.amount,
+        deduction: 0,
+        bonus: 0,
+        netPay: e.amount,
+        deductionReasons: [],
+        bonusReasons: [],
+        isSpecialOrder: true,
+        routeName: e.routeName,
+      });
     }
 
     return dailyRecords.sort(

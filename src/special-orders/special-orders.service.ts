@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma.service';
 import { Prisma } from '@prisma/client';
 import { PushService } from '../push/push.service';
 import { parseEstDate } from '../utils/date';
+import { getPayrollWeekKey } from '../utils/payroll-week';
 
 @Injectable()
 export class SpecialOrdersService {
@@ -93,10 +94,27 @@ export class SpecialOrdersService {
     if (!order) throw new NotFoundException('Order not found');
     if (order.status === 'accepted') throw new BadRequestException('Order already accepted');
 
-    return this.prisma.specialOrder.update({
+    const updated = await this.prisma.specialOrder.update({
       where: { id },
       data: { status: 'accepted', acceptedBy: driverId, acceptedByName: driverName },
     });
+
+    // Create payroll earning for this driver — computed on-the-fly, not stored in Payroll table
+    const orderDate = new Date(order.date);
+    const { key: weekNumber } = getPayrollWeekKey(orderDate);
+    await (this.prisma.specialOrderEarning as any).create({
+      data: {
+        specialOrderId: id,
+        driverId,
+        weekNumber,
+        date: orderDate,
+        amount: order.price,
+        routeName: order.routeName,
+        stops: order.stops,
+      },
+    });
+
+    return updated;
   }
 
   async reject(id: number, driverId: number) {
