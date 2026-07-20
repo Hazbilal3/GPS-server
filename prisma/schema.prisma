@@ -206,21 +206,52 @@ model LeaveRequest {
 }
 
 model SpecialOrder {
-  id              Int                  @id @default(autoincrement())
-  routeName       String
-  stops           Int
-  date            DateTime
-  price           Float
-  description     String?
-  status          String               @default("pending") // "pending" | "accepted" | "rejected"
-  targetType      String               // "specific" | "all"
-  targetDriverIds Json?                // array of driverIds e.g. [12345, 254306]
-  rejectedBy      Json?                // array of driverIds who rejected
-  acceptedBy      Int?
-  acceptedByName  String?
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  earning         SpecialOrderEarning?
+  id                Int                  @id @default(autoincrement())
+  routeName         String
+  stops             Int
+  date              DateTime
+  price             Float
+  description       String?
+  status            String               @default("pending") // "pending" | "accepted" | "rejected"
+  targetType        String               // "specific" | "all"
+  targetDriverIds   Json?                // array of driverIds e.g. [12345, 254306]
+  rejectedBy        Json?                // array of driverIds who rejected
+  acceptedBy        Int?
+  acceptedByName    String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  earning           SpecialOrderEarning?
+  // Custom route extra fields
+  pickupAddress     String?
+  deliveryAddress   String?
+  pickupTime        String?
+  dropoffTime       String?
+  vehicleSize       String?
+  miles             Float?
+  pieces            Int?
+  itemWeight        Float?
+  pickupPersonName  String?
+  pickupPersonPhone String?
+  dropoffPersonName String?
+  dropoffPersonPhone String?
+  // Driver delivery flow
+  driverStatus      String?  // null | "picked_up" | "delivered"
+  pickupPhotoUrl    String?
+  deliveryPhotoUrl  String?
+  payrollStatus     String?  // null | "pending" | "approved" | "rejected"
+}
+
+model DriverNotification {
+  id        Int      @id @default(autoincrement())
+  driverId  Int
+  title     String
+  body      String
+  type      String?
+  orderId   Int?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([driverId])
 }
 
 model SpecialOrderEarning {

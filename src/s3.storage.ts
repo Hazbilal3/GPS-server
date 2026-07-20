@@ -1,4 +1,4 @@
-import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { extname } from 'path';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -30,6 +30,25 @@ export function createS3Storage(folder: string) {
       cb(null, `${folder}/${name}${extname(file.originalname || '') || '.jpg'}`);
     },
   });
+}
+
+export async function uploadBufferToS3(
+  folder: string,
+  buffer: Buffer,
+  originalname: string,
+  mimetype: string,
+): Promise<string> {
+  const name = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+  const key = `${folder}/${name}${extname(originalname || '') || '.jpg'}`;
+  await getS3().send(
+    new PutObjectCommand({
+      Bucket: bucket(),
+      Key: key,
+      Body: buffer,
+      ContentType: mimetype || 'image/jpeg',
+    }),
+  );
+  return `https://${bucket()}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
 }
 
 export async function deleteS3File(urlOrKey: string): Promise<void> {

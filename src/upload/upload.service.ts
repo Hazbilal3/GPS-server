@@ -615,7 +615,9 @@ const driverUploads = await prisma.upload.findMany({
         } as any,
         orderBy: { weekNumber: 'desc' },
       }),
-      (this.prisma as any).specialOrderEarning.findMany(),
+      (this.prisma as any).specialOrderEarning.findMany({
+        include: { specialOrder: { select: { acceptedByName: true } } },
+      }),
     ]);
 
     // Index earnings by "driverId|weekNumber"
@@ -626,57 +628,98 @@ const driverUploads = await prisma.upload.findMany({
       earningsByDriverWeek[key].push(e);
     }
 
-    const groupedPayroll = Object.entries(
-      payrollData.reduce((acc, record) => {
-        const week = record.weekNumber;
-        if (typeof week !== 'number') return acc;
-        if (!acc[week]) acc[week] = [];
-        acc[week].push(record as unknown as PayrollRecord);
-        return acc;
-      }, {} as Record<number, PayrollRecord[]>),
-    ).map(([weekNumber, records]) => {
-      const wn = Number(weekNumber);
-      const drivers = records.map((r) => {
-        const soEarnings = earningsByDriverWeek[`${r.driverId}|${wn}`] ?? [];
-        const soTotal = soEarnings.reduce((s: number, e: any) => s + e.amount, 0);
-        return {
-          driverId: r.driverId,
-          driverName: r.driverName,
-          salaryType: r.salaryType,
-          totalStops: r.totalDeliveries,
-          subtotal: Number(((r.amount || 0) + soTotal).toFixed(2)),
-          totalDeduction: r.totalDeduction,
-          totalBonus: (r as any).totalBonus || 0,
-          netPay: Number(((r.netPay || 0) + soTotal).toFixed(2)),
-          remarks: (r as any).remarks || '',
-          bonusRemarks: (r as any).bonusRemarks || '',
-          zipBreakdown: r.zipBreakdown ?? [],
-          specialOrders: soEarnings.map((e: any) => ({
-            id: e.id,
-            routeName: e.routeName,
-            stops: e.stops,
-            amount: e.amount,
-            date: e.date instanceof Date ? e.date.toISOString().slice(0, 10) : String(e.date).slice(0, 10),
-          })),
-          payrollId: (r as any).id,
-          paymentStatus: (r as any).paymentStatus || 'unpaid',
+    const fmtDate = (d: any) => (d instanceof Date ? d : new Date(d)).toISOString().slice(0, 10);
+
+    const groupedWeeks: Record<number, any> = {};
+
+    // Build weeks from regular Payroll records
+    for (const record of payrollData) {
+      const wn = record.weekNumber;
+      if (typeof wn !== 'number') continue;
+      if (!groupedWeeks[wn]) {
+        groupedWeeks[wn] = {
+          weekNumber: wn,
+          payPeriod: (record as any).payPeriod || '',
+          totalStops: 0, subtotal: 0, totalDeductions: 0, totalBonuses: 0, netPay: 0,
+          drivers: [],
         };
+      }
+      const soEarnings = earningsByDriverWeek[`${record.driverId}|${wn}`] ?? [];
+      const soTotal = soEarnings.reduce((s: number, e: any) => s + e.amount, 0);
+      groupedWeeks[wn].drivers.push({
+        driverId: record.driverId,
+        driverName: record.driverName,
+        salaryType: record.salaryType,
+        totalStops: record.totalDeliveries,
+        subtotal: Number((Number(record.amount || 0) + soTotal).toFixed(2)),
+        totalDeduction: record.totalDeduction,
+        totalBonus: (record as any).totalBonus || 0,
+        netPay: Number((Number(record.netPay || 0) + soTotal).toFixed(2)),
+        remarks: (record as any).remarks || '',
+        bonusRemarks: (record as any).bonusRemarks || '',
+        zipBreakdown: record.zipBreakdown ?? [],
+        specialOrders: soEarnings.map((e: any) => ({
+          id: e.id, routeName: e.routeName, stops: e.stops, amount: e.amount,
+          date: fmtDate(e.date),
+        })),
+        payrollId: (record as any).id,
+        paymentStatus: (record as any).paymentStatus || 'unpaid',
       });
+    }
 
-      const soWeekTotal = drivers.reduce((s, d) => s + (d.specialOrders?.reduce((a: number, e: any) => a + e.amount, 0) ?? 0), 0);
-      return {
-        weekNumber: wn,
-        payPeriod: records[0]?.payPeriod || '',
-        totalStops: records.reduce((sum, r) => sum + (r.totalDeliveries || 0), 0),
-        subtotal: Number((records.reduce((sum, r) => sum + (r.amount || 0), 0) + soWeekTotal).toFixed(2)),
-        totalDeductions: Number(records.reduce((sum, r) => sum + (r.totalDeduction || 0), 0).toFixed(2)),
-        totalBonuses: Number(records.reduce((sum, r) => sum + ((r as any).totalBonus || 0), 0).toFixed(2)),
-        netPay: Number((records.reduce((sum, r) => sum + (r.netPay || 0), 0) + soWeekTotal).toFixed(2)),
-        drivers,
-      };
-    });
+    // Recalculate week-level totals
+    for (const wn of Object.keys(groupedWeeks)) {
+      const g = groupedWeeks[Number(wn)];
+      g.totalStops      = g.drivers.reduce((s: number, d: any) => s + (d.totalStops || 0), 0);
+      g.subtotal        = Number(g.drivers.reduce((s: number, d: any) => s + (d.subtotal || 0), 0).toFixed(2));
+      g.totalDeductions = Number(g.drivers.reduce((s: number, d: any) => s + (d.totalDeduction || 0), 0).toFixed(2));
+      g.totalBonuses    = Number(g.drivers.reduce((s: number, d: any) => s + (d.totalBonus || 0), 0).toFixed(2));
+      g.netPay          = Number(g.drivers.reduce((s: number, d: any) => s + (d.netPay || 0), 0).toFixed(2));
+    }
 
-    return groupedPayroll;
+    // Add SO-only entries: weeks/drivers not covered by any Payroll record
+    const payrollDriverWeekKeys = new Set(payrollData.map(r => `${r.driverId}|${r.weekNumber}`));
+    for (const [keyStr, soList] of Object.entries(earningsByDriverWeek)) {
+      if (payrollDriverWeekKeys.has(keyStr)) continue;
+      const [driverIdStr, weekNumStr] = keyStr.split('|');
+      const wn = Number(weekNumStr);
+      const dId = Number(driverIdStr);
+      const soTotal = soList.reduce((s: number, e: any) => s + e.amount, 0);
+      if (!groupedWeeks[wn]) {
+        const firstDate = soList[0].date instanceof Date ? soList[0].date : new Date(soList[0].date);
+        const { periodStart, periodEnd } = getPayrollWeekKey(firstDate);
+        groupedWeeks[wn] = {
+          weekNumber: wn,
+          payPeriod: `${fmtDate(periodStart)} - ${fmtDate(periodEnd)}`,
+          totalStops: 0, subtotal: 0, totalDeductions: 0, totalBonuses: 0, netPay: 0,
+          drivers: [],
+        };
+      }
+      const driverName = soList[0].specialOrder?.acceptedByName || `Driver ${dId}`;
+      groupedWeeks[wn].drivers.push({
+        driverId: dId,
+        driverName,
+        salaryType: null,
+        totalStops: 0,
+        subtotal: soTotal,
+        totalDeduction: 0,
+        totalBonus: 0,
+        netPay: soTotal,
+        remarks: '',
+        bonusRemarks: '',
+        zipBreakdown: [],
+        specialOrders: soList.map((e: any) => ({
+          id: e.id, routeName: e.routeName, stops: e.stops, amount: e.amount,
+          date: fmtDate(e.date),
+        })),
+        payrollId: 0,
+        paymentStatus: 'so_only',
+      });
+      groupedWeeks[wn].subtotal = Number((groupedWeeks[wn].subtotal + soTotal).toFixed(2));
+      groupedWeeks[wn].netPay   = Number((groupedWeeks[wn].netPay   + soTotal).toFixed(2));
+    }
+
+    return Object.values(groupedWeeks).sort((a, b) => b.weekNumber - a.weekNumber);
   }
 
   /**
@@ -705,7 +748,9 @@ const driverUploads = await prisma.upload.findMany({
       earningsByWeek[e.weekNumber].push(e);
     }
 
-    return driverPayroll.map((record) => {
+    const fmtD = (d: any) => (d instanceof Date ? d : new Date(d)).toISOString().slice(0, 10);
+
+    const result: any[] = driverPayroll.map((record) => {
       const soEarnings = earningsByWeek[record.weekNumber] ?? [];
       const soTotal = soEarnings.reduce((s: number, e: any) => s + e.amount, 0);
       return {
@@ -721,16 +766,44 @@ const driverUploads = await prisma.upload.findMany({
         bonusRemarks: (record as any).bonusRemarks || '',
         zipBreakdown: record.zipBreakdown ?? [],
         specialOrders: soEarnings.map((e: any) => ({
-          id: e.id,
-          routeName: e.routeName,
-          stops: e.stops,
-          amount: e.amount,
-          date: e.date instanceof Date ? e.date.toISOString().slice(0, 10) : String(e.date).slice(0, 10),
+          id: e.id, routeName: e.routeName, stops: e.stops, amount: e.amount,
+          date: fmtD(e.date),
         })),
         payrollId: (record as any).id,
         paymentStatus: (record as any).paymentStatus || 'unpaid',
       };
     });
+
+    // Add SO-only weeks (driver has SO earnings but no regular Payroll record that week)
+    const payrollWeeks = new Set<number>(driverPayroll.map(r => r.weekNumber));
+    for (const [weekNumStr, soList] of Object.entries(earningsByWeek)) {
+      const wn = Number(weekNumStr);
+      if (payrollWeeks.has(wn)) continue;
+      const soTotal = soList.reduce((s: number, e: any) => s + e.amount, 0);
+      const firstDate = soList[0].date instanceof Date ? soList[0].date : new Date(soList[0].date);
+      const { periodStart, periodEnd } = getPayrollWeekKey(firstDate);
+      result.push({
+        weekNumber: wn,
+        payPeriod: `${fmtD(periodStart)} - ${fmtD(periodEnd)}`,
+        salaryType: null,
+        totalStops: 0,
+        subtotal: soTotal,
+        totalDeduction: 0,
+        totalBonus: 0,
+        netPay: soTotal,
+        remarks: '',
+        bonusRemarks: '',
+        zipBreakdown: [],
+        specialOrders: soList.map((e: any) => ({
+          id: e.id, routeName: e.routeName, stops: e.stops, amount: e.amount,
+          date: fmtD(e.date),
+        })),
+        payrollId: 0,
+        paymentStatus: 'so_only',
+      });
+    }
+
+    return result.sort((a, b) => b.weekNumber - a.weekNumber);
   }
 
   async updatePaymentStatus(payrollId: number, status: string) {

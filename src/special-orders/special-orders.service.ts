@@ -1,13 +1,18 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { Prisma } from '@prisma/client';
 import { PushService } from '../push/push.service';
 import { parseEstDate } from '../utils/date';
 import { getPayrollWeekKey } from '../utils/payroll-week';
+import { DriverNotificationsService } from '../driver-notifications/driver-notifications.service';
 
 @Injectable()
 export class SpecialOrdersService {
-  constructor(private prisma: PrismaService, private push: PushService) {}
+  constructor(
+    private prisma: PrismaService,
+    private push: PushService,
+    private notifService: DriverNotificationsService,
+  ) {}
 
   async create(body: {
     routeName: string;
@@ -17,6 +22,18 @@ export class SpecialOrdersService {
     description?: string;
     targetType: 'specific' | 'all';
     targetDriverIds?: number[];
+    pickupAddress?: string;
+    deliveryAddress?: string;
+    pickupTime?: string;
+    dropoffTime?: string;
+    vehicleSize?: string;
+    miles?: number;
+    pieces?: number;
+    itemWeight?: number;
+    pickupPersonName?: string;
+    pickupPersonPhone?: string;
+    dropoffPersonName?: string;
+    dropoffPersonPhone?: string;
   }) {
     const order = await this.prisma.specialOrder.create({
       data: {
@@ -28,20 +45,28 @@ export class SpecialOrdersService {
         targetType: body.targetType,
         targetDriverIds: body.targetDriverIds ?? Prisma.JsonNull,
         status: 'pending',
+        pickupAddress: body.pickupAddress || null,
+        deliveryAddress: body.deliveryAddress || null,
+        pickupTime: body.pickupTime || null,
+        dropoffTime: body.dropoffTime || null,
+        vehicleSize: body.vehicleSize || null,
+        miles: body.miles ?? null,
+        pieces: body.pieces ?? null,
+        itemWeight: body.itemWeight ?? null,
+        pickupPersonName: body.pickupPersonName || null,
+        pickupPersonPhone: body.pickupPersonPhone || null,
+        dropoffPersonName: body.dropoffPersonName || null,
+        dropoffPersonPhone: body.dropoffPersonPhone || null,
       },
     });
 
-    // Send push notifications to target drivers
-    this.sendOrderNotification(order.id, body.routeName, body.stops, body.price, body.targetType, body.targetDriverIds);
+    this.sendOrderNotification(order, body.targetType, body.targetDriverIds);
 
     return order;
   }
 
   private async sendOrderNotification(
-    orderId: number,
-    routeName: string,
-    stops: number,
-    price: number,
+    order: any,
     targetType: 'specific' | 'all',
     targetDriverIds?: number[],
   ) {
@@ -51,22 +76,43 @@ export class SpecialOrdersService {
           ? { driverId: { not: null }, pushToken: { not: null } }
           : { driverId: { in: targetDriverIds ?? [] }, pushToken: { not: null } };
 
-      const drivers = await this.prisma.user.findMany({ where, select: { pushToken: true } });
+      const drivers = await this.prisma.user.findMany({ where, select: { pushToken: true, driverId: true } });
       const tokens = drivers.map((d) => d.pushToken).filter(Boolean) as string[];
 
-      await this.push.sendToMany(
-        tokens,
-        'Route Available',
-        `${routeName} | ${stops} Stop${stops !== 1 ? 's' : ''} | $${price}`,
-        { type: 'new_order', orderId },
-      );
+      const parts: string[] = [];
+      if (order.pickupAddress && order.deliveryAddress) {
+        parts.push(`${order.pickupAddress} → ${order.deliveryAddress}`);
+      } else {
+        parts.push(order.routeName);
+      }
+      parts.push(`${order.stops} Stop${order.stops !== 1 ? 's' : ''}`);
+      parts.push(`$${order.price}`);
+      if (order.pieces != null) parts.push(`${order.pieces} pcs`);
+      if (order.miles != null) parts.push(`${order.miles} mi`);
+      if (order.vehicleSize) parts.push(order.vehicleSize);
+      if (order.itemWeight != null) parts.push(`${order.itemWeight} lbs`);
+
+      const msg = parts.join(' | ');
+      await this.push.sendToMany(tokens, 'Route Available', msg, { type: 'new_order', orderId: order.id });
+      for (const d of drivers) {
+        if (d.driverId) {
+          await this.notifService.create(d.driverId, 'Route Available', msg, 'new_order', order.id).catch(() => {});
+        }
+      }
     } catch (_) {}
   }
 
-  async findAll() {
-    return this.prisma.specialOrder.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(page = 1, pageSize = 20) {
+    const skip = (page - 1) * pageSize;
+    const [data, total] = await Promise.all([
+      this.prisma.specialOrder.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.specialOrder.count(),
+    ]);
+    return { data, total, page, pageSize };
   }
 
   async findForDriver(driverId: number) {
@@ -75,14 +121,10 @@ export class SpecialOrdersService {
     });
 
     return all.filter((order) => {
-      // Always show orders this driver accepted (so they see their accepted badge)
       if (order.status === 'accepted' && order.acceptedBy === driverId) return true;
-      // Hide non-pending orders
       if (order.status !== 'pending') return false;
-      // Hide orders this driver already rejected
       const rejected = (order.rejectedBy as number[]) || [];
       if (rejected.includes(driverId)) return false;
-      // Show pending orders targeted at this driver
       if (order.targetType === 'all') return true;
       const ids = (order.targetDriverIds as number[]) || [];
       return ids.includes(driverId);
@@ -94,27 +136,217 @@ export class SpecialOrdersService {
     if (!order) throw new NotFoundException('Order not found');
     if (order.status === 'accepted') throw new BadRequestException('Order already accepted');
 
-    const updated = await this.prisma.specialOrder.update({
+    return this.prisma.specialOrder.update({
       where: { id },
       data: { status: 'accepted', acceptedBy: driverId, acceptedByName: driverName },
     });
+  }
 
-    // Create payroll earning for this driver — computed on-the-fly, not stored in Payroll table
-    const orderDate = new Date(order.date);
-    const { key: weekNumber } = getPayrollWeekKey(orderDate);
-    await (this.prisma.specialOrderEarning as any).create({
-      data: {
-        specialOrderId: id,
-        driverId,
-        weekNumber,
-        date: orderDate,
-        amount: order.price,
-        routeName: order.routeName,
-        stops: order.stops,
-      },
+  async markPickedUp(id: number, driverId: number, pickupPhotoUrl: string) {
+    const order = await this.prisma.specialOrder.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.acceptedBy !== driverId) throw new ForbiddenException();
+    if (order.driverStatus === 'delivered') throw new BadRequestException('Already delivered');
+
+    return this.prisma.specialOrder.update({
+      where: { id },
+      data: { driverStatus: 'picked_up', pickupPhotoUrl },
+    });
+  }
+
+  async markDelivered(id: number, driverId: number, deliveryPhotoUrl: string) {
+    const order = await this.prisma.specialOrder.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.acceptedBy !== driverId) throw new ForbiddenException();
+    if (order.driverStatus !== 'picked_up') throw new BadRequestException('Must mark as picked up first');
+
+    return this.prisma.specialOrder.update({
+      where: { id },
+      data: { driverStatus: 'delivered', deliveryPhotoUrl, payrollStatus: 'pending' },
+    });
+  }
+
+  async getPendingPayrolls() {
+    return this.prisma.specialOrder.findMany({
+      where: { payrollStatus: 'pending' },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async getPendingPayrollCount() {
+    return this.prisma.specialOrder.count({ where: { payrollStatus: 'pending' } });
+  }
+
+  async approvePayroll(id: number) {
+    const order = await this.prisma.specialOrder.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.payrollStatus !== 'pending') throw new BadRequestException('Not pending approval');
+
+    await this.prisma.specialOrder.update({
+      where: { id },
+      data: { payrollStatus: 'approved' },
     });
 
-    return updated;
+    // Create SpecialOrderEarning now (approval = pay)
+    const orderDate = new Date(order.date);
+    const { key: weekNumber } = getPayrollWeekKey(orderDate);
+    const existingEarning = await (this.prisma as any).specialOrderEarning.findUnique({
+      where: { specialOrderId: id },
+    });
+    if (!existingEarning) {
+      await (this.prisma as any).specialOrderEarning.create({
+        data: {
+          specialOrderId: id,
+          driverId: order.acceptedBy!,
+          weekNumber,
+          date: orderDate,
+          amount: order.price,
+          routeName: order.routeName,
+          stops: order.stops,
+        },
+      });
+    }
+
+    // Notify driver
+    try {
+      const approveMsg = `Your delivery for ${order.routeName} has been approved. $${order.price} added to your settlements.`;
+      await this.notifService.create(order.acceptedBy!, 'Delivery Approved', approveMsg, 'payroll_approved', id).catch(() => {});
+      const driver = await this.prisma.user.findFirst({
+        where: { driverId: order.acceptedBy! },
+        select: { pushToken: true },
+      });
+      if (driver?.pushToken) {
+        await this.push.sendToMany([driver.pushToken], 'Delivery Approved', approveMsg, { type: 'payroll_approved', orderId: id });
+      }
+    } catch (_) {}
+
+    return { success: true };
+  }
+
+  async rejectPayroll(id: number) {
+    const order = await this.prisma.specialOrder.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.payrollStatus !== 'pending') throw new BadRequestException('Not pending approval');
+
+    await this.prisma.specialOrder.update({
+      where: { id },
+      data: { payrollStatus: 'rejected' },
+    });
+
+    // Notify driver
+    try {
+      const rejectMsg = `Your delivery proof for ${order.routeName} was not approved. No payment will be issued.`;
+      await this.notifService.create(order.acceptedBy!, 'Delivery Rejected', rejectMsg, 'payroll_rejected', id).catch(() => {});
+      const driver = await this.prisma.user.findFirst({
+        where: { driverId: order.acceptedBy! },
+        select: { pushToken: true },
+      });
+      if (driver?.pushToken) {
+        await this.push.sendToMany([driver.pushToken], 'Delivery Rejected', rejectMsg, { type: 'payroll_rejected', orderId: id });
+      }
+    } catch (_) {}
+
+    return { success: true };
+  }
+
+  async cancelOrder(id: number, reason: string, tonuAmount: number) {
+    const order = await this.prisma.specialOrder.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.status !== 'accepted') throw new BadRequestException('This order cannot be cancelled (status: ' + order.status + ')');
+    if (order.driverStatus === 'delivered') throw new BadRequestException('Cannot cancel an order that has already been delivered');
+
+    const { key: weekNumber } = getPayrollWeekKey(new Date());
+    const today = new Date().toISOString().slice(0, 10);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.specialOrder.update({
+        where: { id },
+        data: { status: 'cancelled' },
+      });
+
+      if (tonuAmount > 0 && order.acceptedBy) {
+        await tx.payrollAdjustment.create({
+          data: {
+            driverId: order.acceptedBy,
+            weekNumber,
+            date: today,
+            type: 'bonus',
+            amount: tonuAmount,
+            reason: `Tonu — cancelled order: ${order.routeName}${reason ? ` (${reason})` : ''}`,
+          },
+        });
+      }
+    });
+
+    // Recalculate payroll bonus totals so the tonu appears in the payroll table
+    if (tonuAmount > 0 && order.acceptedBy) {
+      try {
+        const allAdj = await this.prisma.payrollAdjustment.findMany({
+          where: { driverId: order.acceptedBy, weekNumber },
+        });
+        const totalDeduction = Number(
+          allAdj.filter((a) => a.type === 'deduction').reduce((s, a) => s + a.amount, 0).toFixed(2),
+        );
+        const totalBonus = Number(
+          allAdj.filter((a) => a.type === 'bonus').reduce((s, a) => s + a.amount, 0).toFixed(2),
+        );
+
+        const existing = await this.prisma.payroll.findUnique({
+          where: { driverId_weekNumber: { driverId: order.acceptedBy, weekNumber } },
+        });
+
+        if (existing) {
+          const netPay = Number(((existing as any).amount - totalDeduction + totalBonus).toFixed(2));
+          await this.prisma.payroll.update({
+            where: { driverId_weekNumber: { driverId: order.acceptedBy, weekNumber } },
+            data: { totalBonus, totalDeduction, netPay } as any,
+          });
+        } else {
+          // No regular payroll record this week — create a stub so the tonu is visible
+          const { periodStart, periodEnd } = getPayrollWeekKey(new Date());
+          const payPeriod = `${periodStart.toISOString().slice(0, 10)} - ${periodEnd.toISOString().slice(0, 10)}`;
+          const driverUser = await this.prisma.user.findFirst({
+            where: { driverId: order.acceptedBy },
+            select: { fullName: true },
+          });
+          await this.prisma.payroll.create({
+            data: {
+              driverId: order.acceptedBy,
+              driverName: driverUser?.fullName || (order as any).acceptedByName || '',
+              weekNumber,
+              payPeriod,
+              salaryType: 'Regular',
+              totalDeliveries: 0,
+              stopsCompleted: 0,
+              amount: 0,
+              totalDeduction,
+              totalBonus,
+              netPay: totalBonus - totalDeduction,
+              zipCode: null,
+              zipBreakdown: Prisma.JsonNull,
+            } as any,
+          });
+        }
+      } catch (_) {}
+    }
+
+    if (order.acceptedBy) {
+      try {
+        const cancelMsg = tonuAmount > 0
+          ? `${order.routeName} has been cancelled. $${tonuAmount} tonu added to your settlements.`
+          : `${order.routeName} has been cancelled.`;
+        await this.notifService.create(order.acceptedBy, 'Order Cancelled', cancelMsg, 'order_cancelled', id).catch(() => {});
+        const driver = await this.prisma.user.findFirst({
+          where: { driverId: order.acceptedBy },
+          select: { pushToken: true },
+        });
+        if (driver?.pushToken) {
+          await this.push.sendToMany([driver.pushToken], 'Order Cancelled', cancelMsg, { type: 'order_cancelled', orderId: id });
+        }
+      } catch (_) {}
+    }
+
+    return { success: true };
   }
 
   async reject(id: number, driverId: number) {
@@ -123,11 +355,10 @@ export class SpecialOrdersService {
     if (order.status === 'accepted') throw new BadRequestException('Order already accepted');
 
     const currentRejected = (order.rejectedBy as number[]) || [];
-    if (currentRejected.includes(driverId)) return order; // already rejected
+    if (currentRejected.includes(driverId)) return order;
 
     const rejectedBy = [...currentRejected, driverId];
 
-    // Mark as rejected when all targeted specific drivers have rejected
     let newStatus = order.status;
     if (order.targetType === 'specific') {
       const targetIds = (order.targetDriverIds as number[]) || [];
