@@ -13,6 +13,7 @@ import {
   Req,
   ForbiddenException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { PoolService } from './pool.service';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -20,7 +21,7 @@ import { basename, resolve, join } from 'path';
 import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
-import { createS3Storage, S3File } from '../s3.storage';
+import { createS3Storage, getS3Object, S3File } from '../s3.storage';
 
 const localUploadDir = join(__dirname, '../../uploads/pool-docs');
 const poolDocStorage = createS3Storage('pool-docs');
@@ -93,6 +94,20 @@ export class PoolController {
     if (!number) throw new BadRequestException('License number is required.');
     if (!expiry) throw new BadRequestException('License expiry is required.');
     return this.service.submitCard(req.user.sub, 'license', { number, expiry, docUrl: (file as S3File).location || `/pool/file/${file.filename}` });
+  }
+
+  @Get('s3proxy')
+  @UseGuards(AuthGuard, AdminGuard)
+  async proxyS3Doc(@Query('url') url: string, @Res() res: Response) {
+    if (!url) throw new BadRequestException('url is required');
+    try {
+      const { body, contentType } = await getS3Object(decodeURIComponent(url));
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      (body as any).pipe(res);
+    } catch {
+      throw new NotFoundException('Document not found');
+    }
   }
 
   @Get('my-status')

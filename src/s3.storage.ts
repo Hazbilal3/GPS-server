@@ -1,4 +1,4 @@
-import { S3Client, DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { extname } from 'path';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -49,6 +49,15 @@ export async function uploadBufferToS3(
     }),
   );
   return `https://${bucket()}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
+}
+
+export async function getS3Object(urlOrKey: string): Promise<{ body: NodeJS.ReadableStream; contentType: string }> {
+  const key = urlOrKey.startsWith('https://') ? new URL(urlOrKey).pathname.slice(1) : urlOrKey;
+  const result = await getS3().send(new GetObjectCommand({ Bucket: bucket(), Key: key }));
+  return {
+    body: result.Body as NodeJS.ReadableStream,
+    contentType: result.ContentType || 'application/octet-stream',
+  };
 }
 
 export async function deleteS3File(urlOrKey: string): Promise<void> {
