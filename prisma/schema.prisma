@@ -358,3 +358,19 @@ model DriverPool {
 
   @@index([status])
 }
+
+model EarlyPayoutRequest {
+  id          Int      @id @default(autoincrement())
+  payrollId   Int
+  driverId    Int
+  driverName  String
+  weekNumber  Int
+  reason      String
+  status      String   @default("pending") // "pending" | "approved" | "denied"
+  adminNote   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([driverId])
+  @@index([payrollId])
+}

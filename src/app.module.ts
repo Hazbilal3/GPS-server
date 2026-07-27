@@ -23,6 +23,7 @@ import { PayrollAdjustmentModule } from './payroll-adjustment/payroll-adjustment
 import { DriverScheduleModule } from './driver-schedule/driver-schedule.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PoolModule } from './pool/pool.module';
+import { EarlyPayoutModule } from './early-payout/early-payout.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DriverNotificationsModule } from './driver-notifications/driver-notifications.module';
@@ -45,6 +46,7 @@ import { DriverNotificationsModule } from './driver-notifications/driver-notific
     PayrollAdjustmentModule,
     DriverScheduleModule,
     PoolModule,
+    EarlyPayoutModule,
   ],
   controllers: [
     UploadController,
