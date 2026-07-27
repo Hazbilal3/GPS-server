@@ -96,6 +96,18 @@ export class PoolController {
     return this.service.submitCard(req.user.sub, 'license', { number, expiry, docUrl: (file as S3File).location || `/pool/file/${file.filename}` });
   }
 
+  @Post('submit-w9')
+  @UseGuards(AuthGuard)
+  @UseInterceptors(FileInterceptor('file', { storage: poolDocStorage }))
+  async submitW9(
+    @Req() req: any,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('W-9 document is required.');
+    const docUrl = (file as S3File).location || `/pool/file/${file.filename}`;
+    return this.service.submitW9(req.user.sub, docUrl);
+  }
+
   @Get('s3proxy')
   @UseGuards(AuthGuard, AdminGuard)
   async proxyS3Doc(@Query('url') url: string, @Res() res: Response) {

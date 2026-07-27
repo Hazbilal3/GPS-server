@@ -155,9 +155,48 @@ export class PoolService {
       licenseNumber: entry.licenseNumber,
       licenseExpiry: entry.licenseExpiry,
       licenseDocUrl: entry.licenseDocUrl,
+      w9DocUrl: entry.w9DocUrl,
       docName: entry.docName,
       docUrl: entry.docUrl,
     };
+  }
+
+  async submitW9(userId: number, docUrl: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { fullName: true, email: true, phoneNumber: true, poolStatus: true, state: true, operatingType: true },
+    });
+
+    if (!user) throw new NotFoundException('User not found.');
+    if (user.poolStatus !== 'pending' && user.poolStatus !== 'rejected') {
+      throw new BadRequestException('Document submission is not allowed in this state.');
+    }
+
+    if (user.poolStatus === 'rejected') {
+      await this.prisma.user.update({ where: { id: userId }, data: { poolStatus: 'pending' } });
+    }
+
+    const existing = await (this.prisma as any).driverPool.findUnique({ where: { userId } });
+
+    if (existing) {
+      return (this.prisma as any).driverPool.update({
+        where: { userId },
+        data: { w9DocUrl: docUrl, status: 'pending' },
+      });
+    } else {
+      return (this.prisma as any).driverPool.create({
+        data: {
+          userId,
+          fullName: user.fullName || 'Unknown',
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          state: user.state,
+          operatingType: user.operatingType,
+          status: 'pending',
+          w9DocUrl: docUrl,
+        },
+      });
+    }
   }
 
   async getAllPending() {
