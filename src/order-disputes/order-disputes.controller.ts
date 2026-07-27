@@ -42,6 +42,7 @@ export class OrderDisputesController {
   @UseGuards(AuthGuard, AdminGuard)
   @UseInterceptors(FileInterceptor('image', { storage: orderDisputeStorage }))
   async create(
+    @Req() req: any,
     @Body('driverId') driverIdRaw: string,
     @Body('driverName') driverName: string,
     @Body('date') date: string,
@@ -59,6 +60,7 @@ export class OrderDisputesController {
       expectedLocation,
       deliveredLocation,
       imageUrl,
+      createdByAdminId: req.user?.sub,
     });
   }
 

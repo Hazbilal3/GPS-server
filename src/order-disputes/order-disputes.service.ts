@@ -21,7 +21,17 @@ export class OrderDisputesService {
     expectedLocation: string;
     deliveredLocation: string;
     imageUrl?: string;
+    createdByAdminId?: number;
   }) {
+    let createdByName: string | undefined;
+    if (data.createdByAdminId) {
+      const admin = await this.prisma.user.findUnique({
+        where: { id: data.createdByAdminId },
+        select: { fullName: true },
+      });
+      createdByName = admin?.fullName ?? undefined;
+    }
+
     const dispute = await this.prisma.orderDispute.create({
       data: {
         driverId: data.driverId,
@@ -32,6 +42,7 @@ export class OrderDisputesService {
         deliveredLocation: data.deliveredLocation,
         imageUrl: data.imageUrl,
         status: 'open',
+        createdByName,
       },
     });
 
@@ -54,14 +65,14 @@ export class OrderDisputesService {
 
   async getAll() {
     return this.prisma.orderDispute.findMany({
-      orderBy: { date: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
   async getByDriver(driverId: number) {
     return this.prisma.orderDispute.findMany({
       where: { driverId },
-      orderBy: { date: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
   }
 

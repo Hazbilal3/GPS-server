@@ -173,6 +173,7 @@ model OrderDispute {
   deliveredLocation String
   imageUrl          String?
   status            String   @default("open")
+  createdByName     String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   driver            User     @relation(fields: [driverId], references: [driverId])
@@ -346,6 +347,7 @@ model DriverPool {
   licenseNumber    String?
   licenseExpiry    DateTime?
   licenseDocUrl    String?
+  w9DocUrl         String?
   // Legacy single-doc fields (kept nullable for backward compat)
   docName          String?
   docUrl           String?

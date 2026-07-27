@@ -246,6 +246,11 @@ export class DriverService {
   async savePushToken(driverId: number, pushToken: string) {
     const driver = await this.prisma.user.findFirst({ where: { driverId } });
     if (!driver) throw new NotFoundException(`Driver ${driverId} not found`);
+    // Clear this token from any other account first so one device = one recipient
+    await this.prisma.user.updateMany({
+      where: { pushToken, NOT: { id: driver.id } },
+      data: { pushToken: null },
+    });
     await this.prisma.user.update({ where: { id: driver.id }, data: { pushToken } });
     return { message: 'Push token saved' };
   }
