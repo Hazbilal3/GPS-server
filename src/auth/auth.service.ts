@@ -224,13 +224,23 @@ export class AuthService {
     state?: string;
     operatingType?: string;
   }) {
-    // Check for duplicate email or phone number
+    // Check for duplicate email — if unverified ghost account exists, clean it up and allow re-signup
     const existingEmail = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (existingEmail) throw new ConflictException('An account with this email already exists.');
+    if (existingEmail) {
+      if (!existingEmail.emailVerified) {
+        await this.prisma.user.delete({ where: { id: existingEmail.id } });
+      } else {
+        throw new ConflictException('An account with this email already exists.');
+      }
+    }
 
     if (dto.phoneNumber) {
       const existingPhone = await this.prisma.user.findUnique({ where: { phoneNumber: dto.phoneNumber } });
-      if (existingPhone) throw new ConflictException('An account with this phone number already exists.');
+      if (existingPhone && existingPhone.emailVerified) {
+        throw new ConflictException('An account with this phone number already exists.');
+      } else if (existingPhone && !existingPhone.emailVerified) {
+        await this.prisma.user.delete({ where: { id: existingPhone.id } });
+      }
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
