@@ -225,6 +225,16 @@ export class PoolService {
     const entry = await this.prisma.driverPool.findUnique({ where: { id } });
     if (!entry) throw new NotFoundException('Pool entry not found.');
 
+    const missingDocs: string[] = [];
+    if (!entry.insuranceDocUrl)    missingDocs.push('Insurance');
+    if (!entry.registrationDocUrl) missingDocs.push('Registration');
+    if (!entry.licenseDocUrl)      missingDocs.push("Driver's License");
+    if (missingDocs.length > 0) {
+      throw new BadRequestException(
+        `Cannot approve: Missing ${missingDocs.join(', ')} document${missingDocs.length > 1 ? 's' : ''}.`,
+      );
+    }
+
     const existingDriver = await this.prisma.user.findFirst({
       where: { driverId: assignedDriverId },
     });
