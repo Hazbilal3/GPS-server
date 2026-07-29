@@ -5,14 +5,14 @@ import { PrismaService } from '../prisma.service';
 export class EarlyPayoutService {
   constructor(private prisma: PrismaService) {}
 
-  async create(driverId: number, payrollId: number, weekNumber: number, driverName: string, reason: string) {
+  async create(driverId: number, payrollId: number | null, weekNumber: number, driverName: string, reason: string) {
     const existing = await (this.prisma as any).earlyPayoutRequest.findFirst({
       where: { driverId, weekNumber, status: { in: ['pending', 'approved'] } },
     });
     if (existing) throw new BadRequestException('A request already exists for this week.');
 
     return (this.prisma as any).earlyPayoutRequest.create({
-      data: { driverId, payrollId, weekNumber, driverName, reason },
+      data: { driverId, payrollId: payrollId ?? null, weekNumber, driverName, reason },
     });
   }
 
