@@ -7,7 +7,7 @@ export class EarlyPayoutService {
 
   async create(driverId: number, payrollId: number, weekNumber: number, driverName: string, reason: string) {
     const existing = await (this.prisma as any).earlyPayoutRequest.findFirst({
-      where: { payrollId, status: { in: ['pending', 'approved'] } },
+      where: { driverId, weekNumber, status: { in: ['pending', 'approved'] } },
     });
     if (existing) throw new BadRequestException('A request already exists for this week.');
 
