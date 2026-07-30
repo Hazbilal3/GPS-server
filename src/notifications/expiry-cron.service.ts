@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
 import { PushService } from '../push/push.service';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class ExpiryCronService {
@@ -10,6 +11,7 @@ export class ExpiryCronService {
   constructor(
     private prisma: PrismaService,
     private push: PushService,
+    private mail: MailService,
   ) {}
 
   // Runs every day at 6 AM EST (UTC-5 = 11:00 UTC)
@@ -96,5 +98,82 @@ export class ExpiryCronService {
 
       this.logger.log(`Expiry check for +${daysAhead} days: notified ${users.length} driver(s)`);
     }
+  }
+
+  // Runs every day at 12 PM EST (UTC-5 = 17:00 UTC)
+  @Cron('0 17 * * *')
+  async sendMissingInfoEmails() {
+    this.logger.log('Running missing documents/profile email job...');
+
+    const drivers = await (this.prisma.user as any).findMany({
+      where: { userRole: 2, driverId: { not: null } },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        phoneNumber: true,
+        state: true,
+        operatingType: true,
+        salaryType: true,
+      },
+    });
+
+    const allDocs = await (this.prisma as any).driverDocument.findMany({
+      where: { driverId: { in: (drivers as any[]).map((d: any) => d.id) } },
+      select: { driverId: true, description: true },
+    });
+
+    const docsByDriver = new Map<number, string[]>();
+    for (const doc of allDocs as any[]) {
+      if (!docsByDriver.has(doc.driverId)) docsByDriver.set(doc.driverId, []);
+      docsByDriver.get(doc.driverId)!.push((doc.description ?? '').toLowerCase());
+    }
+
+    const appName = process.env.APP_NAME || 'CMJL';
+    let emailsSent = 0;
+
+    for (const driver of drivers as any[]) {
+      if (!driver.email) continue;
+
+      const missing: string[] = [];
+
+      if (!driver.fullName)       missing.push('Full Name');
+      if (!driver.phoneNumber)    missing.push('Phone Number');
+      if (!driver.state)          missing.push('State');
+      if (!driver.operatingType)  missing.push('Operating Type');
+      if (!driver.salaryType)     missing.push('Salary / Pay Type');
+
+      const docs = docsByDriver.get(driver.id) ?? [];
+      if (!docs.some((d: string) => d.includes('insurance')))    missing.push('Insurance Document');
+      if (!docs.some((d: string) => d.includes('registration'))) missing.push('Registration Document');
+      if (!docs.some((d: string) => d.includes('license')))      missing.push('Driver\'s License Document');
+
+      if (missing.length === 0) continue;
+
+      const firstName = (driver.fullName ?? 'Driver').split(' ')[0];
+      const listHtml = missing.map(item => `<li style="margin:4px 0">${item}</li>`).join('');
+      const html = `
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6">
+          <p>Hi ${firstName},</p>
+          <p>This is a daily reminder that your driver profile is missing the following information or documents. Please update them as soon as possible to avoid any interruptions to your work.</p>
+          <ul style="padding-left:20px;margin:12px 0">
+            ${listHtml}
+          </ul>
+          <p>Please log in to the app and complete your profile.</p>
+          <p style="color:#64748b;font-size:12px;margin-top:16px">— ${appName} Team</p>
+        </div>
+      `;
+
+      await this.mail.send(
+        driver.email,
+        `${appName} — Action Required: Missing Profile Information`,
+        html,
+        `Hi ${firstName}, your profile is missing: ${missing.join(', ')}. Please log in to update.`,
+      ).catch((err: any) => this.logger.error(`Failed to send missing-info email to ${driver.email}: ${err.message}`));
+
+      emailsSent++;
+    }
+
+    this.logger.log(`Missing-info email job done: sent to ${emailsSent}/${(drivers as any[]).length} driver(s)`);
   }
 }
