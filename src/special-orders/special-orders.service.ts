@@ -2,15 +2,19 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { PrismaService } from '../prisma.service';
 import { Prisma } from '@prisma/client';
 import { PushService } from '../push/push.service';
+import { MailService } from '../mail/mail.service';
 import { parseEstDate } from '../utils/date';
 import { getPayrollWeekKey } from '../utils/payroll-week';
 import { DriverNotificationsService } from '../driver-notifications/driver-notifications.service';
+
+const ADMIN_ACCEPT_EMAIL = 'c.taveras@expeditedtransportservices.net';
 
 @Injectable()
 export class SpecialOrdersService {
   constructor(
     private prisma: PrismaService,
     private push: PushService,
+    private mail: MailService,
     private notifService: DriverNotificationsService,
   ) {}
 
@@ -136,10 +140,37 @@ export class SpecialOrdersService {
     if (!order) throw new NotFoundException('Order not found');
     if (order.status === 'accepted') throw new BadRequestException('Order already accepted');
 
-    return this.prisma.specialOrder.update({
+    const updated = await this.prisma.specialOrder.update({
       where: { id },
       data: { status: 'accepted', acceptedBy: driverId, acceptedByName: driverName },
     });
+
+    const appName = process.env.APP_NAME || 'CMJL';
+    const html = `
+      <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6">
+        <p>A driver has accepted a special order.</p>
+        <table style="border-collapse:collapse;width:100%;max-width:480px">
+          <tr><td style="padding:6px 12px;font-weight:600;background:#f8fafc;border:1px solid #e2e8f0">Order #</td><td style="padding:6px 12px;border:1px solid #e2e8f0">${id}</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:600;background:#f8fafc;border:1px solid #e2e8f0">Route</td><td style="padding:6px 12px;border:1px solid #e2e8f0">${order.routeName}</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:600;background:#f8fafc;border:1px solid #e2e8f0">Driver</td><td style="padding:6px 12px;border:1px solid #e2e8f0">${driverName} (ID: ${driverId})</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:600;background:#f8fafc;border:1px solid #e2e8f0">Date</td><td style="padding:6px 12px;border:1px solid #e2e8f0">${order.date ? new Date(order.date).toDateString() : '—'}</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:600;background:#f8fafc;border:1px solid #e2e8f0">Stops</td><td style="padding:6px 12px;border:1px solid #e2e8f0">${order.stops}</td></tr>
+          <tr><td style="padding:6px 12px;font-weight:600;background:#f8fafc;border:1px solid #e2e8f0">Price</td><td style="padding:6px 12px;border:1px solid #e2e8f0">$${order.price}</td></tr>
+          ${order.pickupAddress ? `<tr><td style="padding:6px 12px;font-weight:600;background:#f8fafc;border:1px solid #e2e8f0">Pickup</td><td style="padding:6px 12px;border:1px solid #e2e8f0">${order.pickupAddress}</td></tr>` : ''}
+          ${order.deliveryAddress ? `<tr><td style="padding:6px 12px;font-weight:600;background:#f8fafc;border:1px solid #e2e8f0">Delivery</td><td style="padding:6px 12px;border:1px solid #e2e8f0">${order.deliveryAddress}</td></tr>` : ''}
+          ${order.description ? `<tr><td style="padding:6px 12px;font-weight:600;background:#f8fafc;border:1px solid #e2e8f0">Notes</td><td style="padding:6px 12px;border:1px solid #e2e8f0">${order.description}</td></tr>` : ''}
+        </table>
+        <p style="color:#64748b;font-size:12px;margin-top:16px">— ${appName} System</p>
+      </div>
+    `;
+    this.mail.send(
+      ADMIN_ACCEPT_EMAIL,
+      `${appName} — Order #${id} Accepted by ${driverName}`,
+      html,
+      `Driver ${driverName} (ID: ${driverId}) has accepted Order #${id} — ${order.routeName}.`,
+    ).catch(err => console.error('[SpecialOrders] Failed to send accept email:', err));
+
+    return updated;
   }
 
   async markPickedUp(id: number, driverId: number, pickupPhotoUrl: string) {
