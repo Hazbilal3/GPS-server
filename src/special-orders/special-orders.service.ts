@@ -7,7 +7,8 @@ import { parseEstDate } from '../utils/date';
 import { getPayrollWeekKey } from '../utils/payroll-week';
 import { DriverNotificationsService } from '../driver-notifications/driver-notifications.service';
 
-const ADMIN_ACCEPT_EMAIL = 'c.taveras@expeditedtransportservices.net';
+const ADMIN_EMAIL = 'c.taveras@expeditedtransportservices.net';
+const ROUTES_EMAIL = 'ets.routes@gmail.com';
 
 @Injectable()
 export class SpecialOrdersService {
@@ -163,8 +164,10 @@ export class SpecialOrdersService {
         <p style="color:#64748b;font-size:12px;margin-top:16px">— ${appName} System</p>
       </div>
     `;
+    const isRoute = !order.pickupAddress;
+    const recipients = isRoute ? [ADMIN_EMAIL, ROUTES_EMAIL] : ADMIN_EMAIL;
     this.mail.send(
-      ADMIN_ACCEPT_EMAIL,
+      recipients,
       `${appName} — Order #${id} Accepted by ${driverName}`,
       html,
       `Driver ${driverName} (ID: ${driverId}) has accepted Order #${id} — ${order.routeName}.`,
