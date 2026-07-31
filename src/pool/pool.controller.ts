@@ -122,6 +122,12 @@ export class PoolController {
     }
   }
 
+  @Post('finalize')
+  @UseGuards(AuthGuard)
+  async finalize(@Req() req: any) {
+    return this.service.finalize(req.user.sub);
+  }
+
   @Get('my-status')
   @UseGuards(AuthGuard)
   async getMyStatus(@Req() req: any) {

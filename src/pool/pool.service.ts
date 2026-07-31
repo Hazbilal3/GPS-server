@@ -154,6 +154,28 @@ export class PoolService {
     }
   }
 
+  async finalize(userId: number) {
+    const entry = await this.prisma.driverPool.findUnique({ where: { userId } });
+
+    if (!entry) throw new BadRequestException('No documents uploaded yet. Please upload your documents first.');
+
+    const missing: string[] = [];
+    if (!entry.insuranceDocUrl)    missing.push('Insurance');
+    if (!entry.registrationDocUrl) missing.push('Registration');
+    if (!entry.licenseDocUrl)      missing.push("Driver's License");
+
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Please upload all required documents before submitting: ${missing.join(', ')}.`,
+      );
+    }
+
+    return this.prisma.driverPool.update({
+      where: { userId },
+      data: { status: 'pending' },
+    });
+  }
+
   async getMyStatus(userId: number) {
     const entry = await this.prisma.driverPool.findUnique({ where: { userId } });
     if (!entry) {
