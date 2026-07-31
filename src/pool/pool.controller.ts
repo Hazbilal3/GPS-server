@@ -103,7 +103,7 @@ export class PoolController {
     @Req() req: any,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    if (!file) throw new BadRequestException('W-9 document is required.');
+    if (!file) return { message: 'W-9 skipped.' };
     const docUrl = (file as S3File).location || `/pool/file/${file.filename}`;
     return this.service.submitW9(req.user.sub, docUrl);
   }
