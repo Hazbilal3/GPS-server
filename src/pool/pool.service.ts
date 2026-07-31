@@ -76,13 +76,14 @@ export class PoolService {
 
     const existing = await this.prisma.driverPool.findUnique({ where: { userId } });
 
+    let saved;
     if (existing) {
-      return this.prisma.driverPool.update({
+      saved = await this.prisma.driverPool.update({
         where: { userId },
-        data: { ...cardDataMap[cardType], status: 'pending' },
+        data: cardDataMap[cardType],
       });
     } else {
-      return this.prisma.driverPool.create({
+      saved = await this.prisma.driverPool.create({
         data: {
           userId,
           fullName: user.fullName || 'Unknown',
@@ -90,11 +91,25 @@ export class PoolService {
           phoneNumber: user.phoneNumber,
           state: user.state,
           operatingType: user.operatingType,
-          status: 'pending',
+          status: 'draft',
           ...cardDataMap[cardType],
         },
       });
     }
+
+    // Only promote to pending (visible to admin) when all 3 required docs are present
+    if (saved.status !== 'approved' && saved.status !== 'rejected') {
+      const allDocsPresent = !!(saved.insuranceDocUrl && saved.registrationDocUrl && saved.licenseDocUrl);
+      const targetStatus = allDocsPresent ? 'pending' : 'draft';
+      if (saved.status !== targetStatus) {
+        saved = await this.prisma.driverPool.update({
+          where: { userId },
+          data: { status: targetStatus },
+        });
+      }
+    }
+
+    return saved;
   }
 
   async submitDocument(userId: number, docUrl: string) {
@@ -208,7 +223,7 @@ export class PoolService {
 
   async getAll(status?: string) {
     return this.prisma.driverPool.findMany({
-      where: status ? { status } : undefined,
+      where: status ? { status } : { status: { not: 'draft' } },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -224,16 +239,6 @@ export class PoolService {
   async approve(id: number, assignedDriverId: number) {
     const entry = await this.prisma.driverPool.findUnique({ where: { id } });
     if (!entry) throw new NotFoundException('Pool entry not found.');
-
-    const missingDocs: string[] = [];
-    if (!entry.insuranceDocUrl)    missingDocs.push('Insurance');
-    if (!entry.registrationDocUrl) missingDocs.push('Registration');
-    if (!entry.licenseDocUrl)      missingDocs.push("Driver's License");
-    if (missingDocs.length > 0) {
-      throw new BadRequestException(
-        `Cannot approve: Missing ${missingDocs.join(', ')} document${missingDocs.length > 1 ? 's' : ''}.`,
-      );
-    }
 
     const existingDriver = await this.prisma.user.findFirst({
       where: { driverId: assignedDriverId },
