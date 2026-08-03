@@ -25,7 +25,7 @@ export class SpecialOrdersService {
     date: string;
     price: number;
     description?: string;
-    targetType: 'specific' | 'all';
+    targetType: 'specific' | 'all' | 'category';
     targetDriverIds?: number[];
     pickupAddress?: string;
     deliveryAddress?: string;
@@ -65,14 +65,21 @@ export class SpecialOrdersService {
       },
     });
 
-    this.sendOrderNotification(order, body.targetType, body.targetDriverIds);
+    // For category orders, resolve the saved available-driver IDs at creation time
+    let resolvedTargetIds = body.targetDriverIds;
+    if (body.targetType === 'category') {
+      const available = await this.prisma.availableDriver.findMany();
+      resolvedTargetIds = available.map(a => a.driverId);
+    }
+
+    this.sendOrderNotification(order, body.targetType, resolvedTargetIds);
 
     return order;
   }
 
   private async sendOrderNotification(
     order: any,
-    targetType: 'specific' | 'all',
+    targetType: 'specific' | 'all' | 'category',
     targetDriverIds?: number[],
   ) {
     try {

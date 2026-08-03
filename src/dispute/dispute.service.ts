@@ -113,6 +113,15 @@ export class DisputeService {
     return this.prisma.dispute.count({ where: { status: 'open' } });
   }
 
+  // Mark all messages sent by the other party as read (called when a user opens a thread)
+  async markMessagesRead(disputeId: number, readerRole: 'admin' | 'driver') {
+    const senderRole = readerRole === 'admin' ? 'driver' : 'admin';
+    await this.prisma.disputeMessage.updateMany({
+      where: { disputeId, senderRole, isRead: false },
+      data: { isRead: true },
+    });
+  }
+
   // Admin: delete a dispute
   async deleteDispute(id: number) {
     const dispute = await this.prisma.dispute.findUnique({ where: { id } });

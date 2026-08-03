@@ -10,24 +10,80 @@ export class PoolService {
   ) {}
 
   private async sendApprovalEmail(to: string, fullName: string, driverId: number) {
-    const appName = process.env.APP_NAME || 'CMJL';
     const html = `
-      <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6">
-        <p>Hi <strong>${fullName}</strong>,</p>
-        <p>Your driver account has been <strong>approved</strong>! You can now log in to the driver portal.</p>
-        <p>Your Driver ID is:</p>
-        <p style="font-size:28px;font-weight:700;letter-spacing:4px;margin:16px 0;color:#1e293b">${driverId}</p>
-        <p>Use this Driver ID along with your password to log in.</p>
-        <p>Welcome to the team!</p>
-        <p style="color:#64748b;font-size:12px">— ${appName} Team</p>
+      <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1e293b;max-width:600px">
+        <p>Dear Driver,</p>
+
+        <p>Thank you for applying through the <strong>CMJL Driver App</strong>.</p>
+
+        <p>Your application has been received by <strong>Expedited Transport Services</strong>, our affiliated transportation company, which manages customer contracts and driver onboarding.</p>
+
+        <p style="margin-top:20px">
+          <strong>Your Driver ID:</strong>
+          <span style="display:block;font-size:28px;font-weight:700;letter-spacing:4px;margin:8px 0 20px;color:#1f6feb">${driverId}</span>
+          Please keep this ID — you will need it to log in to the driver portal once your account is fully activated.
+        </p>
+
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>
+
+        <p>
+          <strong>Action Required:</strong> To activate your driver account, you must complete the two onboarding steps below.
+          You will receive two separate invitation emails from our trusted partners.
+          Please complete each invitation <strong>within 24 hours</strong> of receiving it to avoid delays in activating your account.
+        </p>
+
+        <p style="margin-top:20px"><strong>Step 1: Gusto – Direct Deposit Setup</strong></p>
+        <p>
+          Gusto is our secure payroll provider. You will receive an email asking you to set up your direct deposit by entering your banking information.<br/>
+          <span style="color:#64748b">Expected sender: Gusto (gusto.com)</span>
+        </p>
+
+        <p style="margin-top:20px"><strong>Step 2: Openforce – Driver Verification</strong></p>
+        <p>
+          Openforce manages our independent contractor verification process. Their email will guide you through submitting your driver's license, vehicle registration, and completing your enrollment.<br/>
+          <span style="color:#64748b">Expected sender: Openforce (oforce.com)</span>
+        </p>
+
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>
+
+        <p><strong>Before You Begin</strong></p>
+        <p>Please have the following ready:</p>
+        <ul style="padding-left:20px;line-height:2">
+          <li>Banking information (for Gusto)</li>
+          <li>Valid driver's license</li>
+          <li>Current vehicle registration</li>
+        </ul>
+
+        <p style="margin-top:20px"><strong>Important Reminders</strong></p>
+        <ul style="padding-left:20px;line-height:2">
+          <li>Both emails are legitimate and expected. Please do not mark them as spam.</li>
+          <li>If you do not receive an email within a few hours, please check your Spam or Junk folder.</li>
+          <li>The two invitations may arrive at different times. Complete each one as soon as it arrives.</li>
+          <li>Each invitation must be completed within 24 hours of receipt.</li>
+          <li>Your account cannot be activated until both steps have been successfully completed and approved.</li>
+        </ul>
+
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>
+
+        <p>If you have any questions or do not receive either invitation, please contact us.</p>
+        <p><strong>Phone:</strong> 860-988-3887</p>
+
+        <p style="margin-top:24px">Thank you for choosing CMJL and Expedited Transport Services. We look forward to having you on the team!</p>
+
+        <p style="margin-top:24px">
+          Sincerely,<br/>
+          <strong>Expedited Transport Services</strong><br/>
+          <span style="color:#64748b">In partnership with CMJL Driver App</span>
+        </p>
       </div>
     `;
+    const text = `Dear Driver,\n\nThank you for applying through the CMJL Driver App.\n\nYour Driver ID is: ${driverId}\n\nTo activate your account, complete two onboarding steps:\n1. Gusto (gusto.com) – Direct Deposit Setup\n2. Openforce (oforce.com) – Driver Verification\n\nComplete each invitation within 24 hours of receipt.\n\nPhone: 860-988-3887\n\nSincerely,\nExpedited Transport Services\nIn partnership with CMJL Driver App`;
     try {
       await this.mail.send(
         to,
-        `Your ${appName} Driver Account is Approved — Driver ID: ${driverId}`,
+        `Welcome to CMJL — Your Driver ID: ${driverId} & Next Steps`,
         html,
-        `Hi ${fullName}, your driver account has been approved. Your Driver ID is: ${driverId}. Use this to log in to the driver portal.`,
+        text,
       );
     } catch (err) {
       console.error('[PoolService] Failed to send approval email:', err);

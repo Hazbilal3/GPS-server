@@ -12,6 +12,7 @@ import {
   Res,
   UseGuards,
   ForbiddenException,
+  Req,
 } from '@nestjs/common';
 import { DisputeService } from './dispute.service';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -97,6 +98,17 @@ export class DisputeController {
   ) {
     const attachmentUrl = file ? ((file as S3File).location || `/disputes/file/${file.filename}`) : undefined;
     return this.disputeService.addMessage(id, senderRole, senderName, content, attachmentUrl);
+  }
+
+  @Patch(':id/read')
+  @UseGuards(AuthGuard)
+  async markRead(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: any,
+  ) {
+    const role: 'admin' | 'driver' = req.user.role === 2 ? 'driver' : 'admin';
+    await this.disputeService.markMessagesRead(id, role);
+    return { ok: true };
   }
 
   @Patch(':id/status')

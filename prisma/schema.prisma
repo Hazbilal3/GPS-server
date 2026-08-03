@@ -153,12 +153,13 @@ model Dispute {
 }
 
 model DisputeMessage {
-  id         Int      @id @default(autoincrement())
-  disputeId  Int
-  senderRole String
-  senderName String
+  id            Int      @id @default(autoincrement())
+  disputeId     Int
+  senderRole    String
+  senderName    String
   content       String
   attachmentUrl String?
+  isRead        Boolean  @default(false)
   createdAt     DateTime @default(now())
   dispute       Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
 }
@@ -240,6 +241,12 @@ model SpecialOrder {
   pickupPhotoUrl    String?
   deliveryPhotoUrl  String?
   payrollStatus     String?  // null | "pending" | "approved" | "rejected"
+}
+
+model AvailableDriver {
+  id        Int      @id @default(autoincrement())
+  driverId  Int      @unique
+  createdAt DateTime @default(now())
 }
 
 model DriverNotification {

@@ -27,6 +27,7 @@ import { EarlyPayoutModule } from './early-payout/early-payout.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DriverNotificationsModule } from './driver-notifications/driver-notifications.module';
+import { AvailableDriversModule } from './available-drivers/available-drivers.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { DriverNotificationsModule } from './driver-notifications/driver-notific
     DriverScheduleModule,
     PoolModule,
     EarlyPayoutModule,
+    AvailableDriversModule,
   ],
   controllers: [
     UploadController,
