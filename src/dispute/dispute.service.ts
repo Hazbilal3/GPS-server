@@ -118,7 +118,7 @@ export class DisputeService {
     const senderRole = readerRole === 'admin' ? 'driver' : 'admin';
     await this.prisma.disputeMessage.updateMany({
       where: { disputeId, senderRole, isRead: false },
-      data: { isRead: true },
+      data: { isRead: true, readAt: new Date() },
     });
   }
 
