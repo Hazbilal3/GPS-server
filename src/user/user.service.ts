@@ -30,6 +30,8 @@ export class DriverService {
         state: true,
         operatingType: true,
         profileImageUrl: true,
+        gustoComplete: true,
+        openforceComplete: true,
       },
     });
   }
@@ -56,6 +58,8 @@ export class DriverService {
         licenseNumber: true,
         licenseExpiry: true,
         profileImageUrl: true,
+        gustoComplete: true,
+        openforceComplete: true,
       },
     });
   }
@@ -315,6 +319,8 @@ export class DriverService {
         registrationExpiry: dto.registrationExpiry ? new Date(dto.registrationExpiry) : undefined,
         licenseNumber: dto.licenseNumber ?? undefined,
         licenseExpiry: dto.licenseExpiry ? new Date(dto.licenseExpiry) : undefined,
+        gustoComplete: dto.gustoComplete ?? undefined,
+        openforceComplete: dto.openforceComplete ?? undefined,
       },
       select: {
         id: true,
@@ -336,6 +342,8 @@ export class DriverService {
         registrationExpiry: true,
         licenseNumber: true,
         licenseExpiry: true,
+        gustoComplete: true,
+        openforceComplete: true,
       },
     });
 

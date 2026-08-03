@@ -52,4 +52,6 @@ export class UpdateDriverDto {
   registrationExpiry?: string;
   licenseNumber?: string;
   licenseExpiry?: string;
+  gustoComplete?: boolean;
+  openforceComplete?: boolean;
 }

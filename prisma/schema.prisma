@@ -48,6 +48,9 @@ model User {
   poolEntry            DriverPool?
   tokenExpiresAt       DateTime?
   profileImageUrl      String?
+  vehicleSize          String?
+  gustoComplete        Boolean   @default(false)
+  openforceComplete    Boolean   @default(false)
 }
 
 model Upload {

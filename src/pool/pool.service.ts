@@ -300,10 +300,12 @@ export class PoolService {
   }
 
   async getAll(status?: string) {
-    return this.prisma.driverPool.findMany({
+    const entries = await this.prisma.driverPool.findMany({
       where: status ? { status } : { status: { not: 'draft' } },
       orderBy: { createdAt: 'desc' },
+      include: { user: { select: { vehicleSize: true } } },
     });
+    return entries.map(e => ({ ...e, vehicleSize: e.user?.vehicleSize ?? null, user: undefined }));
   }
 
   async getNextDriverId(): Promise<{ nextId: number }> {
