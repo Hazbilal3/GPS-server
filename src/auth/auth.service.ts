@@ -223,6 +223,7 @@ export class AuthService {
     password: string;
     state?: string;
     operatingType?: string;
+    vehicleSize?: string;
   }) {
     // Check for duplicate email — if unverified ghost account exists, clean it up and allow re-signup
     const existingEmail = await this.prisma.user.findUnique({ where: { email: dto.email } });
@@ -261,6 +262,7 @@ export class AuthService {
         poolStatus: 'pending',
         state: dto.state || null,
         operatingType: dto.operatingType || null,
+        vehicleSize: dto.vehicleSize || null,
       },
     });
 
