@@ -157,8 +157,10 @@ export class PoolController {
   async approve(
     @Param('id', ParseIntPipe) id: number,
     @Body('driverId', ParseIntPipe) driverId: number,
+    @Body('salaryType') salaryType?: string,
+    @Body('fixedSalary') fixedSalary?: number,
   ) {
-    return this.service.approve(id, driverId);
+    return this.service.approve(id, driverId, salaryType, fixedSalary);
   }
 
   @Post(':id/reject')

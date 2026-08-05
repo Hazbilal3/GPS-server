@@ -316,7 +316,7 @@ export class PoolService {
     return { nextId: maxId + 1 };
   }
 
-  async approve(id: number, assignedDriverId: number) {
+  async approve(id: number, assignedDriverId: number, salaryType?: string, fixedSalary?: number) {
     const entry = await this.prisma.driverPool.findUnique({ where: { id } });
     if (!entry) throw new NotFoundException('Pool entry not found.');
 
@@ -346,6 +346,8 @@ export class PoolService {
         registrationExpiry: entry.registrationExpiry,
         licenseNumber: entry.licenseNumber,
         licenseExpiry: entry.licenseExpiry,
+        salaryType: salaryType ?? null,
+        fixedSalary: salaryType === 'fixed' ? (fixedSalary ?? null) : null,
       },
     });
 
