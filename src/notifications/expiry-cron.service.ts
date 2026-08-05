@@ -7,6 +7,7 @@ import { MailService } from '../mail/mail.service';
 @Injectable()
 export class ExpiryCronService {
   private readonly logger = new Logger(ExpiryCronService.name);
+  private lastMissingInfoDate: string | null = null;
 
   constructor(
     private prisma: PrismaService,
@@ -103,6 +104,12 @@ export class ExpiryCronService {
   // Runs every day at 12 PM EST (UTC-5 = 17:00 UTC)
   @Cron('0 17 * * *')
   async sendMissingInfoEmails() {
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    if (this.lastMissingInfoDate === todayUtc) {
+      this.logger.log('Missing-info email job already ran today, skipping.');
+      return;
+    }
+    this.lastMissingInfoDate = todayUtc;
     this.logger.log('Running missing documents/profile email job...');
 
     const drivers = await (this.prisma.user as any).findMany({
