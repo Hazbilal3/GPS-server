@@ -232,6 +232,7 @@ model SpecialOrder {
   deliveryAddress   String?
   pickupTime        String?
   dropoffTime       String?
+  duration          String?
   vehicleSize       String?
   miles             Float?
   pieces            Int?

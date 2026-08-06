@@ -31,6 +31,7 @@ export class SpecialOrdersService {
     deliveryAddress?: string;
     pickupTime?: string;
     dropoffTime?: string;
+    duration?: string;
     vehicleSize?: string;
     miles?: number;
     pieces?: number;
@@ -54,6 +55,7 @@ export class SpecialOrdersService {
         deliveryAddress: body.deliveryAddress || null,
         pickupTime: body.pickupTime || null,
         dropoffTime: body.dropoffTime || null,
+        duration: body.duration || null,
         vehicleSize: body.vehicleSize || null,
         miles: body.miles ?? null,
         pieces: body.pieces ?? null,
