@@ -11,77 +11,54 @@ export class PoolService {
 
   private async sendApprovalEmail(to: string, fullName: string, driverId: number) {
     const html = `
-      <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1e293b;max-width:600px">
-        <p>Dear Driver,</p>
+      <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.7;color:#1e293b;max-width:600px">
+        <p style="font-size:18px;font-weight:700;margin-bottom:4px">CMJL DRIVER APPLICATION – NEXT STEPS</p>
 
-        <p>Thank you for applying through the <strong>CMJL Driver App</strong>.</p>
+        <p>Congratulations! Your driver application through the CMJL app has been approved. Your Driver ID is: <strong style="font-size:16px;color:#1f6feb">${driverId}</strong></p>
 
-        <p>Your application has been received by <strong>Expedited Transport Services</strong>, our affiliated transportation company, which manages customer contracts and driver onboarding.</p>
+        <p>There are <strong>2 final steps</strong> that must be completed before you can be fully activated and begin accepting routes.</p>
 
-        <p style="margin-top:20px">
-          <strong>Your Driver ID:</strong>
-          <span style="display:block;font-size:28px;font-weight:700;letter-spacing:4px;margin:8px 0 20px;color:#1f6feb">${driverId}</span>
-          Please keep this ID — you will need it to log in to the driver portal once your account is fully activated.
+        <p>You will receive <strong>2 separate emails:</strong></p>
+
+        <p style="margin-top:16px"><strong>1. GUSTO – Payment / Direct Deposit Setup</strong></p>
+        <p style="margin-top:4px">
+          You will receive an invitation from Gusto. Please complete the setup and enter your banking information for direct deposit.
+          This is how your driver payments will be processed.
         </p>
 
-        <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>
-
-        <p>
-          <strong>Action Required:</strong> To activate your driver account, you must complete the two onboarding steps below.
-          You will receive two separate invitation emails from our trusted partners.
-          Please complete each invitation <strong>within 24 hours</strong> of receiving it to avoid delays in activating your account.
+        <p style="margin-top:16px"><strong>2. OPENFORCE – OnTrac Verification</strong></p>
+        <p style="margin-top:4px">
+          You will also receive an invitation from Openforce to complete the required OnTrac verification, including your background, driver's license, and other required information.
         </p>
 
-        <p style="margin-top:20px"><strong>Step 1: Gusto – Direct Deposit Setup</strong></p>
-        <p>
-          Gusto is our secure payroll provider. You will receive an email asking you to set up your direct deposit by entering your banking information.<br/>
-          <span style="color:#64748b">Expected sender: Gusto (gusto.com)</span>
-        </p>
+        <hr style="border:none;border-top:2px solid #fbbf24;margin:24px 0"/>
 
-        <p style="margin-top:20px"><strong>Step 2: Openforce – Driver Verification</strong></p>
-        <p>
-          Openforce manages our independent contractor verification process. Their email will guide you through submitting your driver's license, vehicle registration, and completing your enrollment.<br/>
-          <span style="color:#64748b">Expected sender: Openforce (oforce.com)</span>
-        </p>
-
-        <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>
-
-        <p><strong>Before You Begin</strong></p>
-        <p>Please have the following ready:</p>
+        <p style="font-size:15px;font-weight:700">⚠️ IMPORTANT – PLEASE READ BEFORE COMPLETING OPENFORCE</p>
+        <p>When Openforce asks:</p>
         <ul style="padding-left:20px;line-height:2">
-          <li>Banking information (for Gusto)</li>
-          <li>Valid driver's license</li>
-          <li>Current vehicle registration</li>
-        </ul>
-
-        <p style="margin-top:20px"><strong>Important Reminders</strong></p>
-        <ul style="padding-left:20px;line-height:2">
-          <li>Both emails are legitimate and expected. Please do not mark them as spam.</li>
-          <li>If you do not receive an email within a few hours, please check your Spam or Junk folder.</li>
-          <li>The two invitations may arrive at different times. Complete each one as soon as it arrives.</li>
-          <li>Each invitation must be completed within 24 hours of receipt.</li>
-          <li>Your account cannot be activated until both steps have been successfully completed and approved.</li>
+          <li><strong>Are you a subworker?</strong> → Select <strong>YES</strong><br/>
+            <span style="color:#dc2626">Selecting "No" may cause your application to be canceled.</span>
+          </li>
+          <li><strong>Who pays you?</strong> → Enter: <strong>Expedited Transport Services</strong></li>
         </ul>
 
         <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>
 
-        <p>If you have any questions or do not receive either invitation, please contact us.</p>
-        <p><strong>Phone:</strong> 860-988-3887</p>
+        <p>Please complete both Gusto and Openforce as soon as you receive the emails. Your driver account <strong>cannot be fully activated</strong> until both steps are completed and approved.</p>
 
-        <p style="margin-top:24px">Thank you for choosing CMJL and Expedited Transport Services. We look forward to having you on the team!</p>
+        <p>If you do not see the emails, please check your <strong>Spam/Junk folder</strong> before contacting us.</p>
 
         <p style="margin-top:24px">
-          Sincerely,<br/>
-          <strong>Expedited Transport Services</strong><br/>
-          <span style="color:#64748b">In partnership with CMJL Driver App</span>
+          Thank you,<br/>
+          <strong>CMJL Driver Support</strong>
         </p>
       </div>
     `;
-    const text = `Dear Driver,\n\nThank you for applying through the CMJL Driver App.\n\nYour Driver ID is: ${driverId}\n\nTo activate your account, complete two onboarding steps:\n1. Gusto (gusto.com) – Direct Deposit Setup\n2. Openforce (oforce.com) – Driver Verification\n\nComplete each invitation within 24 hours of receipt.\n\nPhone: 860-988-3887\n\nSincerely,\nExpedited Transport Services\nIn partnership with CMJL Driver App`;
+    const text = `CMJL DRIVER APPLICATION – NEXT STEPS\n\nCongratulations! Your driver application through the CMJL app has been approved. Your Driver ID is: ${driverId}\n\nThere are 2 final steps that must be completed before you can be fully activated and begin accepting routes.\n\n1. GUSTO – Payment / Direct Deposit Setup\nYou will receive an invitation from Gusto to set up your direct deposit.\n\n2. OPENFORCE – OnTrac Verification\nYou will receive an invitation from Openforce to complete the OnTrac verification.\n\n⚠️ IMPORTANT – PLEASE READ BEFORE COMPLETING OPENFORCE\n- Are you a subworker? → Select YES (selecting No may cancel your application)\n- Who pays you? → Enter: Expedited Transport Services\n\nPlease complete both as soon as you receive the emails. If you do not see them, check your Spam/Junk folder.\n\nThank you,\nCMJL Driver Support`;
     try {
       await this.mail.send(
         to,
-        `Welcome to CMJL — Your Driver ID: ${driverId} & Next Steps`,
+        `CMJL Driver Application Approved — Driver ID: ${driverId}`,
         html,
         text,
       );

@@ -380,6 +380,9 @@ model EarlyPayoutRequest {
   reason      String
   status      String   @default("pending") // "pending" | "approved" | "denied"
   adminNote   String?
+  paidDates   String[] // e.g. ["Sat","Sun","Mon"] — days included in early payout
+  paidAmount  Float?   // total amount paid early
+  paidAt      DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

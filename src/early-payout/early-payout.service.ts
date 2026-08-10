@@ -29,12 +29,18 @@ export class EarlyPayoutService {
     });
   }
 
-  async approve(id: number, adminNote?: string) {
+  async approve(id: number, adminNote?: string, paidDates?: string[], paidAmount?: number) {
     const req = await (this.prisma as any).earlyPayoutRequest.findUnique({ where: { id } });
     if (!req) throw new NotFoundException('Request not found.');
     return (this.prisma as any).earlyPayoutRequest.update({
       where: { id },
-      data: { status: 'approved', adminNote: adminNote ?? null },
+      data: {
+        status: 'approved',
+        adminNote: adminNote ?? null,
+        paidDates: paidDates ?? [],
+        paidAmount: paidAmount ?? null,
+        paidAt: new Date(),
+      },
     });
   }
 

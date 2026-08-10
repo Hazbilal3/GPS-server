@@ -33,8 +33,10 @@ export class EarlyPayoutController {
   async approve(
     @Param('id', ParseIntPipe) id: number,
     @Body('adminNote') adminNote?: string,
+    @Body('paidDates') paidDates?: string[],
+    @Body('paidAmount') paidAmount?: number,
   ) {
-    return this.service.approve(id, adminNote);
+    return this.service.approve(id, adminNote, paidDates, paidAmount);
   }
 
   @Patch(':id/deny')
