@@ -28,6 +28,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DriverNotificationsModule } from './driver-notifications/driver-notifications.module';
 import { AvailableDriversModule } from './available-drivers/available-drivers.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { AvailableDriversModule } from './available-drivers/available-drivers.mo
     PoolModule,
     EarlyPayoutModule,
     AvailableDriversModule,
+    MailModule,
   ],
   controllers: [
     UploadController,

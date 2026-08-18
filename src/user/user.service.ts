@@ -6,14 +6,19 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { MailService } from '../mail/mail.service';
 import { CreateDriverDto, UpdateDriverDto } from './user.entity';
 import * as bcrypt from 'bcryptjs';
 import { deleteS3File } from '../s3.storage';
 import * as fs from 'fs';
 import * as path from 'path';
+
 @Injectable()
 export class DriverService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private mail: MailService,
+  ) {}
 
   async getDriverById(driverId: number) {
     return this.prisma.user.findFirst({
@@ -351,5 +356,52 @@ export class DriverService {
       message: 'Driver updated successfully',
       driver: updated,
     };
+  }
+
+  async suspendDriver(driverId: number) {
+    const driver = await this.prisma.user.findFirst({
+      where: { driverId },
+      select: { id: true, email: true, fullName: true, status: true },
+    });
+    if (!driver) throw new NotFoundException(`Driver ${driverId} not found`);
+    await this.prisma.user.update({ where: { id: driver.id }, data: { status: 'Suspended' } });
+
+    if (driver.email) {
+      const appName = process.env.APP_NAME || 'CMJL';
+      const firstName = (driver.fullName ?? 'Driver').split(' ')[0];
+      const html = `
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.7;color:#1e293b;max-width:600px">
+          <p>Hi ${firstName},</p>
+          <p>Your driver account on the <strong>${appName}</strong> platform has been <strong style="color:#dc2626">suspended</strong>.</p>
+          <p>You will not be able to log in or accept routes until your account is reinstated.</p>
+          <p>If you believe this is a mistake or have questions, please contact us directly.</p>
+          <p style="margin-top:24px">
+            <strong>Phone:</strong> 860-988-3887
+          </p>
+          <p style="margin-top:24px">
+            Sincerely,<br/>
+            <strong>${appName} Driver Support</strong>
+          </p>
+        </div>
+      `;
+      await this.mail.send(
+        driver.email,
+        `${appName} — Your Account Has Been Suspended`,
+        html,
+        `Hi ${firstName}, your ${appName} driver account has been suspended. You cannot log in until your account is reinstated. Contact us at 860-988-3887 if you have questions.`,
+      ).catch(() => {});
+    }
+
+    return { message: 'Driver suspended', status: 'Suspended' };
+  }
+
+  async unsuspendDriver(driverId: number) {
+    const driver = await this.prisma.user.findFirst({
+      where: { driverId },
+      select: { id: true },
+    });
+    if (!driver) throw new NotFoundException(`Driver ${driverId} not found`);
+    await this.prisma.user.update({ where: { id: driver.id }, data: { status: 'Active' } });
+    return { message: 'Driver unsuspended', status: 'Active' };
   }
 }

@@ -84,6 +84,18 @@ export class DriverController {
     return this.driverService.updateByDriverId(driverId, { email: body.email });
   }
 
+  @Patch(':driverId/suspend')
+  @UseGuards(AuthGuard, AdminGuard)
+  suspend(@Param('driverId', ParseIntPipe) driverId: number) {
+    return this.driverService.suspendDriver(driverId);
+  }
+
+  @Patch(':driverId/unsuspend')
+  @UseGuards(AuthGuard, AdminGuard)
+  unsuspend(@Param('driverId', ParseIntPipe) driverId: number) {
+    return this.driverService.unsuspendDriver(driverId);
+  }
+
   @Patch(':driverId')
   @UseGuards(AuthGuard, AdminGuard)
   update(

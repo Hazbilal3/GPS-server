@@ -410,6 +410,9 @@ export class AuthService {
           'Account not activated. Please complete registration on the mobile app.',
         );
       }
+      if (user.status === 'Suspended') {
+        throw new UnauthorizedException('Your account has been suspended. Please contact support.');
+      }
       if (!user.emailVerified && user.poolStatus === 'pending') {
         throw new UnauthorizedException('Please verify your email first.');
       }

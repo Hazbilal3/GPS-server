@@ -8,11 +8,16 @@ import {
 import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
 import { Request } from 'express';
+import { PrismaService } from '../prisma.service';
+
 @Injectable()
 export class AuthGuard implements CanActivate {
-  constructor(private configService: ConfigService) {}
+  constructor(
+    private configService: ConfigService,
+    private prisma: PrismaService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
     const token = this.extractToken(request);
 
@@ -28,11 +33,24 @@ export class AuthGuard implements CanActivate {
 
       const payload = jwt.verify(token, secret) as jwt.JwtPayload;
 
-      // Attach user info to the request object
-      request['user'] = payload; // Attach the decoded payload to req.user
+      // For driver tokens, check suspension on every request so already-logged-in
+      // drivers are kicked out immediately when suspended (JWT expires in 365d).
+      if (payload.role === 2 && payload.driverId) {
+        const user = await this.prisma.user.findFirst({
+          where: { driverId: payload.driverId },
+          select: { status: true },
+        });
+        if (user?.status === 'Suspended') {
+          throw new UnauthorizedException('ACCOUNT_SUSPENDED');
+        }
+      }
 
+      request['user'] = payload;
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.message === 'ACCOUNT_SUSPENDED') {
+        throw new UnauthorizedException('Your account has been suspended. Please contact support.');
+      }
       throw new UnauthorizedException('Invalid or expired token');
     }
   }
