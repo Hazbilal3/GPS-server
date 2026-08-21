@@ -196,7 +196,51 @@ export class UploadService {
       { maxWait: 500000, timeout: 500000 },
     );
 
+    // Auto-apply $7 service charge for the upload date (once per driver per day)
+    const scWeek = getPayrollWeekKey(new Date(`${uploadDateStr}T12:00:00.000Z`));
+    const existingCharge = await this.prisma.payrollAdjustment.findFirst({
+      where: { driverId, date: uploadDateStr, type: 'deduction', reason: 'App Fee' },
+    });
+    if (!existingCharge) {
+      await this.prisma.payrollAdjustment.create({
+        data: {
+          driverId,
+          weekNumber: scWeek.key,
+          date: uploadDateStr,
+          type: 'deduction',
+          amount: 7,
+          reason: 'App Fee',
+        },
+      });
+      await this.recalcPayrollTotals(driverId, scWeek.key);
+    }
+
     return transactionResult;
+  }
+
+  private async recalcPayrollTotals(driverId: number, weekNumber: number) {
+    const allAdj = await this.prisma.payrollAdjustment.findMany({
+      where: { driverId, weekNumber },
+    });
+    const totalDeduction = Number(
+      allAdj.filter(a => a.type === 'deduction').reduce((s, a) => s + a.amount, 0).toFixed(2),
+    );
+    const totalBonus = Number(
+      allAdj.filter(a => a.type === 'bonus').reduce((s, a) => s + a.amount, 0).toFixed(2),
+    );
+    const payroll = await this.prisma.payroll.findUnique({
+      where: { driverId_weekNumber: { driverId, weekNumber } },
+      select: { amount: true },
+    });
+    if (!payroll) return;
+    await this.prisma.payroll.update({
+      where: { driverId_weekNumber: { driverId, weekNumber } },
+      data: {
+        totalDeduction,
+        totalBonus,
+        netPay: Number((payroll.amount - totalDeduction + totalBonus).toFixed(2)),
+      },
+    });
   }
 
 // [REPLACE THIS ENTIRE FUNCTION]
@@ -278,6 +322,8 @@ async deleteByDriverAndDate(driverId: number, dateStr: string) {
     );
     const deletedDate = new Date(`${dateStr}T12:00:00.000Z`);
     await this.calculateAndSavePayrollForDriver(driverId, user, this.prisma, deletedDate);
+    // Recalc adjustment totals so the removed service charge is reflected in netPay
+    await this.recalcPayrollTotals(driverId, weekKey);
 
     return {
       driverId,
