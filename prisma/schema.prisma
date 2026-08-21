@@ -51,6 +51,7 @@ model User {
   vehicleSize          String?
   gustoComplete        Boolean   @default(false)
   openforceComplete    Boolean   @default(false)
+  agreements           DriverAgreement[]
 }
 
 model Upload {
@@ -387,4 +388,17 @@ model EarlyPayoutRequest {
   updatedAt   DateTime @updatedAt
 
   @@index([driverId])
+}
+
+model DriverAgreement {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id])
+  agreementType String   // "TERMS_OF_USE" | "IC_AGREEMENT"
+  version       String   @default("1.0")
+  signedAt      DateTime @default(now())
+  signatureName String
+
+  @@unique([userId, agreementType])
+  @@index([userId])
 }

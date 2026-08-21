@@ -29,6 +29,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { DriverNotificationsModule } from './driver-notifications/driver-notifications.module';
 import { AvailableDriversModule } from './available-drivers/available-drivers.module';
 import { MailModule } from './mail/mail.module';
+import { AgreementsModule } from './agreements/agreements.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { MailModule } from './mail/mail.module';
     EarlyPayoutModule,
     AvailableDriversModule,
     MailModule,
+    AgreementsModule,
   ],
   controllers: [
     UploadController,
