@@ -1,9 +1,12 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { MailService } from '../mail/mail.service';
+
+const ADMIN_EMAIL = 'c.taveras@expeditedtransportservices.net';
 
 @Injectable()
 export class EarlyPayoutService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private mail: MailService) {}
 
   async create(driverId: number, payrollId: number | null, weekNumber: number, driverName: string, reason: string) {
     const existing = await (this.prisma as any).earlyPayoutRequest.findFirst({
@@ -11,9 +14,22 @@ export class EarlyPayoutService {
     });
     if (existing) throw new BadRequestException('A request already exists for this week.');
 
-    return (this.prisma as any).earlyPayoutRequest.create({
+    const request = await (this.prisma as any).earlyPayoutRequest.create({
       data: { driverId, payrollId: payrollId ?? null, weekNumber, driverName, reason },
     });
+
+    this.mail.send(
+      ADMIN_EMAIL,
+      `Early Payout Request — ${driverName}`,
+      `<p>A driver has submitted an early payout request.</p>
+       <table cellpadding="8" style="border-collapse:collapse;font-family:sans-serif;font-size:14px;">
+         <tr><td><strong>Name</strong></td><td>${driverName}</td></tr>
+         <tr><td><strong>Driver ID</strong></td><td>${driverId}</td></tr>
+         <tr><td><strong>Reason</strong></td><td>${reason}</td></tr>
+       </table>`,
+    ).catch(() => {});
+
+    return request;
   }
 
   async getMyRequests(driverId: number) {
