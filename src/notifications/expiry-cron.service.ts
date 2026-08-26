@@ -101,6 +101,41 @@ export class ExpiryCronService {
     }
   }
 
+  // Runs every 5 minutes — expires pending orders with no accepted driver
+  // 2 hours before their pickup time
+  @Cron('*/5 * * * *')
+  async expireUnacceptedOrders() {
+    const now = new Date();
+
+    const pending = await this.prisma.specialOrder.findMany({
+      where: { status: 'pending', pickupTime: { not: null } },
+      select: { id: true, date: true, pickupTime: true },
+    });
+
+    const toExpire: number[] = [];
+
+    for (const order of pending) {
+      if (!order.pickupTime || !order.date) continue;
+      // date is stored at noon EST (UTC-5) so UTC date slice is always correct calendar day
+      const dateStr = order.date.toISOString().slice(0, 10);
+      try {
+        const pickupDt = new Date(`${dateStr}T${order.pickupTime}:00-05:00`);
+        if (isNaN(pickupDt.getTime())) continue;
+        const expiresAt = new Date(pickupDt.getTime() - 2 * 60 * 60 * 1000);
+        if (now >= expiresAt) toExpire.push(order.id);
+      } catch (_) {}
+    }
+
+    if (toExpire.length === 0) return;
+
+    await this.prisma.specialOrder.updateMany({
+      where: { id: { in: toExpire }, status: 'pending' },
+      data: { status: 'expired' },
+    });
+
+    this.logger.log(`Auto-expired ${toExpire.length} unaccepted order(s): [${toExpire.join(', ')}]`);
+  }
+
   // Runs every day at 12 PM EST (UTC-5 = 17:00 UTC)
   @Cron('0 17 * * *')
   async sendMissingInfoEmails() {
