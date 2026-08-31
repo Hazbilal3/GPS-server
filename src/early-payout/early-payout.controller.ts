@@ -11,9 +11,9 @@ export class EarlyPayoutController {
   @UseGuards(AuthGuard)
   async create(
     @Req() req: any,
-    @Body() body: { payrollId?: number; weekNumber: number; driverName: string; reason: string },
+    @Body() body: { payrollId?: number; weekNumber: number; driverName: string; reason: string; requestedDates?: string[] },
   ) {
-    return this.service.create(req.user.driverId, body.payrollId ?? null, body.weekNumber, body.driverName, body.reason);
+    return this.service.create(req.user.driverId, body.payrollId ?? null, body.weekNumber, body.driverName, body.reason, body.requestedDates ?? []);
   }
 
   @Get('mine')

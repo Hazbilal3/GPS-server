@@ -373,19 +373,20 @@ model DriverPool {
 }
 
 model EarlyPayoutRequest {
-  id          Int      @id @default(autoincrement())
-  payrollId   Int?
-  driverId    Int
-  driverName  String
-  weekNumber  Int
-  reason      String
-  status      String   @default("pending") // "pending" | "approved" | "denied"
-  adminNote   String?
-  paidDates   String[] // e.g. ["Sat","Sun","Mon"] — days included in early payout
-  paidAmount  Float?   // total amount paid early
-  paidAt      DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             Int      @id @default(autoincrement())
+  payrollId      Int?
+  driverId       Int
+  driverName     String
+  weekNumber     Int
+  reason         String
+  requestedDates String[] // days driver selected when submitting the request
+  status         String   @default("pending") // "pending" | "approved" | "denied"
+  adminNote      String?
+  paidDates      String[] // days admin confirms on approval
+  paidAmount     Float?   // total amount paid early (net, after app fee)
+  paidAt         DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([driverId])
 }
