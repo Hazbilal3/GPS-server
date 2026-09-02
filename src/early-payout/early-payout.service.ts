@@ -9,10 +9,26 @@ export class EarlyPayoutService {
   constructor(private prisma: PrismaService, private mail: MailService) {}
 
   async create(driverId: number, payrollId: number | null, weekNumber: number, driverName: string, reason: string, requestedDates: string[] = []) {
-    const existing = await (this.prisma as any).earlyPayoutRequest.findFirst({
-      where: { driverId, weekNumber, status: { in: ['pending', 'approved'] } },
+    // 1. One submission per calendar day
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const submittedToday = await (this.prisma as any).earlyPayoutRequest.findFirst({
+      where: { driverId, createdAt: { gte: todayStart, lte: todayEnd } },
     });
-    if (existing) throw new BadRequestException('A request already exists for this week.');
+    if (submittedToday) throw new BadRequestException('You have already submitted a request today. Please try again tomorrow.');
+
+    // 2. No day overlap with existing pending or approved requests this week
+    if (requestedDates.length > 0) {
+      const existing = await (this.prisma as any).earlyPayoutRequest.findMany({
+        where: { driverId, weekNumber, status: { in: ['pending', 'approved'] } },
+      });
+      const lockedDays = new Set<string>(existing.flatMap((r: any) => r.requestedDates as string[]));
+      const overlap = requestedDates.filter(d => lockedDays.has(d));
+      if (overlap.length > 0) throw new BadRequestException(`Days already requested: ${overlap.join(', ')}`);
+    }
 
     const request = await (this.prisma as any).earlyPayoutRequest.create({
       data: { driverId, payrollId: payrollId ?? null, weekNumber, driverName, reason, requestedDates },
@@ -47,7 +63,7 @@ export class EarlyPayoutService {
     });
   }
 
-  async approve(id: number, adminNote?: string, paidDates?: string[], paidAmount?: number) {
+  async approve(id: number, adminNote?: string, paidAmount?: number) {
     const req = await (this.prisma as any).earlyPayoutRequest.findUnique({ where: { id } });
     if (!req) throw new NotFoundException('Request not found.');
     return (this.prisma as any).earlyPayoutRequest.update({
@@ -55,7 +71,7 @@ export class EarlyPayoutService {
       data: {
         status: 'approved',
         adminNote: adminNote ?? null,
-        paidDates: paidDates ?? [],
+        paidDates: req.requestedDates, // always mirrors what driver requested
         paidAmount: paidAmount ?? null,
         paidAt: new Date(),
       },
