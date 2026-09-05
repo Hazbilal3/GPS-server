@@ -392,8 +392,23 @@ export class AuthService {
       if (!user || !(await bcrypt.compare(dto.password, user.password))) {
         throw new UnauthorizedException('Invalid admin credentials');
       }
+    } else if (dto.userRole === 5) {
+      // Freight driver — exclusive lookup in FreightDriver table, never falls back to User table
+      const email = (dto as any).email;
+      if (!email) throw new UnauthorizedException('Email is required for freight driver login');
+      const fd = await this.prisma.freightDriver.findUnique({ where: { email } });
+      if (!fd) throw new UnauthorizedException('Invalid credentials');
+      if (!fd.passwordHash) throw new UnauthorizedException('Account not activated. Contact your dispatcher to set your credentials.');
+      const ok = await bcrypt.compare(dto.password, fd.passwordHash);
+      if (!ok) throw new UnauthorizedException('Invalid credentials');
+      if (fd.status !== 'active') throw new UnauthorizedException('Your account is inactive. Contact your dispatcher.');
+      const fdPayload = { sub: fd.id, role: 5, driverType: 'freight', freightDriverId: fd.id };
+      return {
+        accessToken: this.jwtService.sign(fdPayload),
+        user: { id: fd.id, name: fd.name, email: fd.email, role: 5, driverType: 'freight' },
+      };
     } else if (dto.userRole === 2) {
-      // Support both: driverId login (approved drivers) AND email login (pending pool drivers)
+      // Last-mile driver — exclusive lookup in User table only
       if (dto.driverId) {
         user = await this.prisma.user.findFirst({
           where: { driverId: dto.driverId, userRole: 2 },

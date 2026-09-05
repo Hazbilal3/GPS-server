@@ -1,0 +1,719 @@
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { MailService } from '../mail/mail.service';
+import * as bcrypt from 'bcryptjs';
+import { uploadBufferToS3 } from '../s3.storage';
+import { PrismaService } from '../prisma.service';
+import Groq from 'groq-sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse = require('pdf-parse');
+
+const BASE_PROMPT = `You are a freight order parser. Extract all available fields from this document.
+Return ONLY valid JSON — no markdown fences, no explanation, nothing else.
+Use null for any missing field.
+
+JSON structure:
+{
+  "loadNumber": "airbill / BOL / order number at top of doc",
+  "orig": "origin airport or hub code (e.g. BDL, EWR)",
+  "dest": "destination airport or hub code",
+  "serviceType": "service level (Next Day, Same Day, Ground, etc.)",
+  "shipmentValue": "shipment value (e.g. NVD or dollar amount)",
+  "pickupDate": "YYYY-MM-DD or null",
+  "deliveryDate": "YYYY-MM-DD or null (delivery deadline date)",
+  "deliveryTime": "HH:MM or null (delivery deadline time, 24h)",
+  "pickupCompany": "shipper / pickup company name",
+  "pickupAddress": "street address only (no city/state/zip)",
+  "pickupCity": "city",
+  "pickupState": "2-letter state code",
+  "pickupZip": "zip code",
+  "pickupPhone": "phone number or null",
+  "pickupContact": "contact person or null",
+  "pickupReadyTime": "HH:MM or null",
+  "pickupCloseTime": "HH:MM or null",
+  "deliveryCompany": "consignee / delivery company name",
+  "deliveryAddress": "street address only (no city/state/zip)",
+  "deliveryCity": "city",
+  "deliveryState": "2-letter state code",
+  "deliveryZip": "zip code",
+  "deliveryContact": "contact person or null",
+  "deliveryOpenTime": "HH:MM or null",
+  "deliveryCloseTime": "HH:MM or null",
+  "poNumber": "PO number or null",
+  "soNumber": "SO number or null",
+  "invoiceRef": "Invoice number or null",
+  "reference1": "Reference 1 value or null",
+  "reference2": "Reference 2 value or null",
+  "reference3": "Reference 3 value or null",
+  "additionalServices": "comma-separated additional services or null",
+  "pieces": 0,
+  "weight": 0,
+  "cargoLength": 0,
+  "cargoWidth": 0,
+  "cargoHeight": 0,
+  "cargoExt": 0,
+  "cargoDim": "DIM value or null",
+  "packageType": "Carton / Pallet / etc.",
+  "commodity": "cargo description",
+  "specialInstructions": "special instructions text or null"
+}`;
+
+const COMPANY_HINTS: Record<string, string> = {
+  BTX: `This is a BTX Global Logistics BTXBOL document. Key locations:
+- Top right: Airbill Number → loadNumber
+- PICKUP DATE, ORIG, DEST fields in header row
+- SERVICE REQUESTED field (e.g. "Next Day")
+- SHIPMENT VALUE and DELIVERY DEADLINE fields
+- SHIPPER INFORMATION block → pickup fields
+- LOCATION INFORMATION row: READY TIME and CLOSE TIME → pickupReadyTime, pickupCloseTime
+- CONSIGNEE INFORMATION block → delivery fields
+- LOCATION INFORMATION row: OPEN TIME and CLOSE TIME → deliveryOpenTime, deliveryCloseTime
+- REFERENCE MARKS/NUMBERS table: PO Number, SO Number, Invoice Number, Reference 1/2/3
+- ADDITIONAL SERVICES REQUESTED column
+- SPECIAL INSTRUCTIONS section at bottom
+
+CARGO TABLE — read each column independently, do NOT concatenate values:
+  PCS  = pieces (number of packages, e.g. 2)
+  WT   = weight in pounds (e.g. 500)
+  LEN  = length in inches (e.g. 48)
+  WTH  = width in inches (e.g. 40)
+  HGT  = height in inches (e.g. 48)
+  EXT  = extended/cubic value (e.g. 1000)
+  DIM  = dimensional weight (often blank)
+  PACKAGE TYPE = type of packaging (e.g. Carton)
+  DESCRIPTION  = cargo description (e.g. exhibit)
+Read only the FIRST data row of the table (ignore the totals row at the bottom).
+Map: PCS→pieces, WT→weight, LEN→cargoLength, WTH→cargoWidth, HGT→cargoHeight, EXT→cargoExt, DIM→cargoDim`,
+  BOL_OKEE: `This is a Bill of Lading – Short Form (BOL_OKEE / Okeechobee Industries).
+
+Document structure:
+- Date at top left (e.g. "August 17, 2026") → pickupDate (YYYY-MM-DD)
+- "Bill of Lading Number:" field top right → loadNumber (may be blank)
+- orig and dest are null (ground transport, no airport codes)
+
+SHIP FROM section → PICKUP:
+- First line = pickupCompany
+- Second line = pickupAddress (street only)
+- "CITY, STATE ZIP" line → pickupCity, pickupState, pickupZip
+- Ignore "SID No." line
+- Any "SPECIAL HANDELING" or handling note → specialInstructions
+
+SHIP TO section → DELIVERY:
+- First 1-2 lines = deliveryCompany (may span two lines, take all before the address)
+- Street address line → deliveryAddress
+- "CITY, STATE ZIP" → deliveryCity, deliveryState, deliveryZip
+- Last line with a phone number → deliveryContact (name part only), deliveryPhone
+
+CUSTOMER ORDER INFORMATION table:
+- "Customer Order No." → reference1
+- "# of Packages" column rows (e.g. "7 WOOD DOORS", "6 KNOCK DOWN FRAMES", "HARDWARE") → combine all into commodity as comma-separated string
+- "Weight" column: strip text like "LBS PER", sum all numeric weights → weight (total number)
+- "Additional Shipper Information" → append to commodity if different
+
+CARRIER INFORMATION table:
+- "Qty" column (Handling Unit) → pieces
+- "Type" column (Handling Unit) → packageType (e.g. SKID)
+- "Commodity Description" rows → use as commodity if more complete
+
+Ignore all handwritten text, signatures, and checkboxes.
+agreedRate, driverPay, pickupReadyTime, pickupCloseTime, deliveryTime → null`,
+  BOL_MERGE: `This is a Bill of Lading from Merge. Extract all shipper, consignee, cargo, and reference fields as accurately as possible.`,
+  RATE_CON: `This is a Rate Agreement / Rate Confirmation from a freight broker (e.g. ALL STATES TRANSPORT, INC.).
+
+Field locations:
+- "Load #: XXXXXX" near the top → loadNumber
+- orig and dest are null (this is ground transport, no airport codes)
+- shipmentValue: look for "Total Load Value: ..." text
+
+PICKUP — the "S/" section (Shipper):
+- Company name is the first line after the "S/ ====" separator
+- Street address is the next line
+- "CITY, STATE ZIP" line → pickupCity, pickupState, pickupZip
+- "P/U Date/Time: MM/DD/YYYY - H:MM AM - H:MM AM" → pickupDate (convert to YYYY-MM-DD), pickupReadyTime (first time as HH:MM 24h), pickupCloseTime (second time as HH:MM 24h)
+- "Weight: NNN  Pieces: N  Commodity: TEXT" → weight (number), pieces (number), commodity
+
+DELIVERY — the "C/" section (Consignee):
+- Company name is first line after "C/ ====" separator. If a phone number appears on the same line (e.g. "COMPANY NAME 339-613-7222"), strip the phone → deliveryCompany, deliveryPhone
+- Street address may include "Contact: NAME" → deliveryAddress (street only), deliveryContact
+- "CITY, STATE ZIP" → deliveryCity, deliveryState, deliveryZip
+- "Del Date/Time: MM/DD/YYYY - H:MM AM - H:MM PM" → deliveryDate (YYYY-MM-DD), deliveryOpenTime (first time), deliveryCloseTime (second time)
+
+OTHER:
+- "Equipment Required: TYPE" → serviceType
+- DO NOT extract any dollar amounts or rates → leave agreedRate as null
+- Leave poNumber, soNumber, reference1/2/3 as null unless explicitly labeled`,
+};
+
+// Gemini models to try in order for scanned/image PDFs
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-2.5-pro'];
+
+@Injectable()
+export class FreightService {
+  private groq: Groq;
+  private genAI: GoogleGenerativeAI;
+
+  constructor(private prisma: PrismaService, private mail: MailService) {
+    this.groq  = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
+  }
+
+  // ── PDF Parsing ──────────────────────────────────────────
+  async parseOrderPdf(fileBuffer: Buffer, _mimeType: string, company?: string): Promise<any> {
+    const hint = company ? (COMPANY_HINTS[company] ?? '') : '';
+    const fullPrompt = hint ? `${BASE_PROMPT}\n\n${hint}` : BASE_PROMPT;
+
+    // Detect scanned/image PDF — pdf-parse returns almost no text
+    let extractedText = '';
+    try {
+      const parsed = await pdfParse(fileBuffer);
+      extractedText = (parsed.text ?? '').trim();
+    } catch { /* ignore parse errors for image PDFs */ }
+
+    const isScanned = extractedText.length < 150;
+    console.log(`[PDF] text length=${extractedText.length}, isScanned=${isScanned}, company=${company}`);
+
+    if (isScanned) {
+      return this.parseWithGemini(fileBuffer, fullPrompt, company);
+    } else {
+      return this.parseWithGroq(extractedText, fullPrompt, company);
+    }
+  }
+
+  private async parseWithGroq(text: string, fullPrompt: string, company?: string): Promise<any> {
+    try {
+      const chat = await this.groq.chat.completions.create({
+        model: 'openai/gpt-oss-20b',
+        temperature: 0,
+        messages: [
+          { role: 'system', content: fullPrompt },
+          { role: 'user', content: `Extract fields from this freight document:\n\n${text}` },
+        ],
+      });
+
+      const raw = chat.choices[0]?.message?.content ?? '';
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return { _parseError: 'AI returned no JSON. Fill fields manually.' };
+
+      let result: any;
+      try { result = JSON.parse(jsonMatch[0]); }
+      catch { return { _parseError: 'AI returned malformed JSON. Fill fields manually.' }; }
+
+      if (company === 'BTX') {
+        const cargo = this.parseBtxCargo(text);
+        if (cargo) Object.assign(result, cargo);
+      }
+
+      return result;
+    } catch (err: any) {
+      return { _parseError: `Groq error: ${err?.message ?? 'unknown'}. Fill fields manually.` };
+    }
+  }
+
+  private async parseWithGemini(fileBuffer: Buffer, fullPrompt: string, company?: string): Promise<any> {
+    const b64 = fileBuffer.toString('base64');
+    for (const modelName of GEMINI_MODELS) {
+      try {
+        console.log(`[Gemini] trying model: ${modelName}`);
+        const model = this.genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: { responseMimeType: 'application/json', temperature: 0 } as any,
+        });
+        const result = await model.generateContent([
+          { text: fullPrompt },
+          { inlineData: { mimeType: 'application/pdf', data: b64 } },
+        ]);
+        const raw = result.response.text();
+        try { return JSON.parse(raw); }
+        catch { return { _parseError: 'Gemini returned malformed JSON. Fill fields manually.' }; }
+      } catch (err: any) {
+        console.log(`[Gemini] ${modelName} failed: ${err?.message}`);
+        // try next model
+      }
+    }
+    return { _parseError: 'Scanned PDF — all vision models failed. Fill fields manually.' };
+  }
+
+  private parseBtxCargo(text: string): Record<string, number> | null {
+    try {
+      // Step 1: find cargo row — long number (6+ digits) after the "PCSWTLEN" header
+      const headerIdx = text.indexOf('PCSWTLEN');
+      if (headerIdx === -1) return null;
+      const cargoMatch = text.slice(headerIdx).match(/(\d{6,})/);
+      if (!cargoMatch) return null;
+      const cargo = cargoMatch[1]; // e.g. "25004840481000"
+
+      // Step 2: find totals row — the number right before "Units: English"
+      // The totals row is PCS and EXT concatenated: "21000" = PCS(2) + EXT(1000)
+      const totalsMatch = text.match(/(\d+)\s*\n\s*Units:\s*English/i);
+      if (!totalsMatch) return null;
+      const totals = totalsMatch[1]; // e.g. "21000"
+
+      // Step 3: try splitting totals into PCS (1–3 digits) + EXT (rest)
+      // Verify by checking cargo string starts with PCS and ends with EXT
+      let pcs = 0, ext = 0, found = false;
+      for (let n = 1; n <= 3; n++) {
+        const p = parseInt(totals.slice(0, n));
+        const e = parseInt(totals.slice(n));
+        if (p > 0 && e > 0 && cargo.startsWith(String(p)) && cargo.endsWith(String(e))) {
+          pcs = p; ext = e; found = true;
+          break;
+        }
+      }
+      if (!found) return null;
+
+      // Step 4: strip PCS and EXT → middle = WT + LEN + WTH + HGT
+      const middle = cargo.slice(String(pcs).length, cargo.length - String(ext).length);
+      if (middle.length < 6) return null;
+
+      // LEN, WTH, HGT are 2 digits each; WT takes the leading remainder
+      const hgt = parseInt(middle.slice(-2));
+      const wth = parseInt(middle.slice(-4, -2));
+      const len = parseInt(middle.slice(-6, -4));
+      const wt  = parseInt(middle.slice(0, middle.length - 6));
+
+      if (wt <= 0 || len < 10 || wth < 10 || hgt < 10) return null;
+      return { pieces: pcs, weight: wt, cargoLength: len, cargoWidth: wth, cargoHeight: hgt, cargoExt: ext };
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Loads ────────────────────────────────────────────────
+  async getLoads() {
+    return this.prisma.freightLoad.findMany({
+      include: { driver: true, truck: true, milestones: { orderBy: { recordedAt: 'asc' } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getLoad(id: number) {
+    const load = await this.prisma.freightLoad.findUnique({
+      where: { id },
+      include: {
+        driver: true,
+        truck: true,
+        milestones: { orderBy: { recordedAt: 'asc' } },
+        documents: true,
+        preTripInspections: { include: { driver: true } },
+        clockSessions: { include: { driver: true, truck: true } },
+      },
+    });
+    if (!load) throw new NotFoundException('Load not found');
+    return load;
+  }
+
+  async createLoad(data: any) {
+    return this.prisma.freightLoad.create({ data: this.sanitizeDates(data) });
+  }
+
+  async updateLoad(id: number, data: any) {
+    return this.prisma.freightLoad.update({ where: { id }, data: this.sanitizeDates(data) });
+  }
+
+  async deleteLoad(id: number) {
+    return this.prisma.freightLoad.delete({ where: { id } });
+  }
+
+  private sanitizeDates(data: any): any {
+    const out = { ...data };
+    for (const key of ['pickupDate', 'deliveryDate']) {
+      if (out[key] && typeof out[key] === 'string') {
+        out[key] = new Date(out[key] + 'T00:00:00.000Z');
+      }
+    }
+    return out;
+  }
+
+  async assignLoad(id: number, driverId?: number, truckId?: number) {
+    const data: any = { status: 'assigned' };
+    if (driverId) data.driverId = driverId;
+    if (truckId)  data.truckId  = truckId;
+    return this.prisma.freightLoad.update({ where: { id }, data });
+  }
+
+  async updateStatus(id: number, status: string, notes?: string) {
+    const data: any = { status };
+    if (notes) data.internalNotes = notes;
+
+    // Auto-set POD timestamp
+    if (status === 'pod_received') data.podUploadedAt = new Date();
+
+    await this.prisma.freightLoad.update({ where: { id }, data });
+
+    // Record milestone
+    const MILESTONE_MAP: Record<string, string> = {
+      clocked_in: 'clocked_in',
+      en_route_pickup: 'en_route_pickup',
+      at_pickup: 'arrived_pickup',
+      loaded: 'loaded',
+      in_transit: 'in_transit',
+      at_delivery: 'arrived_delivery',
+      delivered: 'delivered',
+      pod_received: 'pod_uploaded',
+    };
+    if (MILESTONE_MAP[status]) {
+      await this.prisma.freightMilestone.create({
+        data: { loadId: id, milestone: MILESTONE_MAP[status] },
+      });
+    }
+
+    return this.prisma.freightLoad.findUnique({ where: { id }, include: { milestones: true } });
+  }
+
+  // ── Drivers ──────────────────────────────────────────────
+  async getDrivers() {
+    return this.prisma.freightDriver.findMany({ orderBy: { name: 'asc' } });
+  }
+
+  async createDriver(data: any) {
+    return this.prisma.freightDriver.create({ data });
+  }
+
+  async updateDriver(id: number, data: any) {
+    return this.prisma.freightDriver.update({ where: { id }, data });
+  }
+
+  async deleteDriver(id: number) {
+    return this.prisma.freightDriver.update({ where: { id }, data: { status: 'inactive' } });
+  }
+
+  // ── Trucks ───────────────────────────────────────────────
+  async getTrucks() {
+    return this.prisma.freightTruck.findMany({ orderBy: { name: 'asc' } });
+  }
+
+  async createTruck(data: any) {
+    return this.prisma.freightTruck.create({ data });
+  }
+
+  async updateTruck(id: number, data: any) {
+    return this.prisma.freightTruck.update({ where: { id }, data });
+  }
+
+  // ── Dashboard Stats ──────────────────────────────────────
+  async getDashboardStats() {
+    const [
+      activeLoads,
+      todayPickups,
+      todayDeliveries,
+      missingPods,
+      readyToBill,
+      totalAR,
+    ] = await Promise.all([
+      this.prisma.freightLoad.count({
+        where: { status: { notIn: ['paid', 'closed', 'unassigned'] } },
+      }),
+      this.prisma.freightLoad.count({
+        where: {
+          pickupDate: {
+            gte: new Date(new Date().setHours(0, 0, 0, 0)),
+            lte: new Date(new Date().setHours(23, 59, 59, 999)),
+          },
+        },
+      }),
+      this.prisma.freightLoad.count({
+        where: {
+          deliveryDate: {
+            gte: new Date(new Date().setHours(0, 0, 0, 0)),
+            lte: new Date(new Date().setHours(23, 59, 59, 999)),
+          },
+        },
+      }),
+      this.prisma.freightLoad.count({ where: { status: 'delivered', podUrl: null } }),
+      this.prisma.freightLoad.count({ where: { status: { in: ['pod_received', 'ready_for_billing'] } } }),
+      this.prisma.freightLoad.aggregate({
+        where: { billingStatus: { in: ['sent', 'partial'] } },
+        _sum: { invoiceAmount: true },
+      }),
+    ]);
+
+    return {
+      activeLoads,
+      todayPickups,
+      todayDeliveries,
+      missingPods,
+      readyToBill,
+      totalAR: totalAR._sum.invoiceAmount ?? 0,
+    };
+  }
+
+  // ── Admin: set freight driver login credentials ───────────
+  async setDriverCredentials(id: number, email: string, password: string) {
+    if (!password || password.length < 6) throw new Error('Password must be at least 6 characters');
+    const hashed = await bcrypt.hash(password, 10);
+    await this.prisma.freightDriver.update({
+      where: { id },
+      data: { email, passwordHash: hashed },
+    });
+    return { success: true };
+  }
+
+  // ── Driver: profile ───────────────────────────────────────
+  async getDriverProfile(freightDriverId: number) {
+    const driver = await this.prisma.freightDriver.findUnique({
+      where: { id: freightDriverId },
+      select: { id: true, name: true, email: true, phone: true, licenseNumber: true, status: true },
+    });
+    if (!driver) throw new NotFoundException('Driver not found');
+    return driver;
+  }
+
+  // ── Driver: my loads ──────────────────────────────────────
+  async getDriverLoads(freightDriverId: number) {
+    return this.prisma.freightLoad.findMany({
+      where: { driverId: freightDriverId },
+      include: { truck: { select: { id: true, name: true, plateNumber: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // ── Driver: single load ───────────────────────────────────
+  async getDriverLoad(freightDriverId: number, loadId: number) {
+    const load = await this.prisma.freightLoad.findUnique({
+      where: { id: loadId },
+      include: {
+        truck: { select: { id: true, name: true, plateNumber: true } },
+        milestones: { orderBy: { recordedAt: 'asc' } },
+        preTripInspections: { orderBy: { completedAt: 'desc' }, take: 1 },
+        clockSessions: { orderBy: { clockInAt: 'desc' }, take: 1 },
+      },
+    });
+    if (!load) throw new NotFoundException('Load not found');
+    if (load.driverId !== freightDriverId) throw new ForbiddenException('Access denied');
+    return load;
+  }
+
+  // ── Driver: clock in ─────────────────────────────────────
+  async driverClockIn(freightDriverId: number, loadId: number) {
+    const load = await this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+    if (!load) throw new NotFoundException('Load not found');
+    if (load.driverId !== freightDriverId) throw new ForbiddenException('Access denied');
+    await this.prisma.freightClockSession.create({
+      data: { loadId, driverId: freightDriverId, truckId: load.truckId ?? undefined, clockInAt: new Date() },
+    });
+    await this.prisma.freightMilestone.create({ data: { loadId, milestone: 'clocked_in' } });
+    return this.prisma.freightLoad.update({ where: { id: loadId }, data: { status: 'clocked_in' } });
+  }
+
+  // ── Driver: clock out ────────────────────────────────────
+  async driverClockOut(freightDriverId: number, loadId: number) {
+    const load = await this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+    if (!load) throw new NotFoundException('Load not found');
+    if (load.driverId !== freightDriverId) throw new ForbiddenException('Access denied');
+    const session = await this.prisma.freightClockSession.findFirst({
+      where: { loadId, driverId: freightDriverId, clockOutAt: null },
+      orderBy: { clockInAt: 'desc' },
+    });
+    if (session) {
+      const now = new Date();
+      const minutes = Math.round((now.getTime() - session.clockInAt.getTime()) / 60000);
+      await this.prisma.freightClockSession.update({
+        where: { id: session.id },
+        data: { clockOutAt: now, totalMinutes: minutes },
+      });
+    }
+    await this.prisma.freightMilestone.create({ data: { loadId, milestone: 'clocked_out' } });
+    return { success: true };
+  }
+
+  // ── Driver: log action (milestone + optional status change) ──
+  async driverAction(freightDriverId: number, loadId: number, action: string) {
+    const load = await this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+    if (!load) throw new NotFoundException('Load not found');
+    if (load.driverId !== freightDriverId) throw new ForbiddenException('Access denied');
+
+    const STATUS_ACTIONS: Record<string, string> = {
+      in_transit: 'in_transit',
+      delivered:  'delivered',
+    };
+
+    await this.prisma.freightMilestone.create({ data: { loadId, milestone: action } });
+
+    const newStatus = STATUS_ACTIONS[action];
+    if (newStatus) {
+      return this.prisma.freightLoad.update({ where: { id: loadId }, data: { status: newStatus } });
+    }
+    return this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+  }
+
+  // ── Driver: submit pre-trip ───────────────────────────────
+  async submitPreTrip(freightDriverId: number, loadId: number, data: any) {
+    const load = await this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+    if (!load) throw new NotFoundException('Load not found');
+    if (load.driverId !== freightDriverId) throw new ForbiddenException('Access denied');
+
+    const CRITICAL = ['license', 'brakes', 'tires', 'lights'];
+    const passed = !CRITICAL.some(k => data[k] === false);
+
+    const inspection = await this.prisma.freightPreTrip.create({
+      data: {
+        loadId,
+        driverId: freightDriverId,
+        license:          data.license          ?? null,
+        medicalCard:      data.medicalCard      ?? null,
+        registration:     data.registration     ?? null,
+        insurance:        data.insurance        ?? null,
+        logbookEld:       data.logbookEld       ?? null,
+        lights:           data.lights           ?? null,
+        horn:             data.horn             ?? null,
+        tires:            data.tires            ?? null,
+        lugNuts:          data.lugNuts          ?? null,
+        windshield:       data.windshield       ?? null,
+        wipers:           data.wipers           ?? null,
+        washerFluid:      data.washerFluid      ?? null,
+        mirrors:          data.mirrors          ?? null,
+        brakes:           data.brakes           ?? null,
+        leaks:            data.leaks            ?? null,
+        fuel:             data.fuel             ?? null,
+        bolPaperwork:     data.bolPaperwork     ?? null,
+        palletJack:       data.palletJack       ?? null,
+        strapsSecurement: data.strapsSecurement ?? null,
+        notes:            data.notes            ?? null,
+        passed,
+      },
+    });
+
+    if (passed) {
+      await this.prisma.freightLoad.update({ where: { id: loadId }, data: { status: 'pre_trip_complete' } });
+    }
+
+    return { passed, inspection };
+  }
+
+  // ── Driver: upload POD ───────────────────────────────────
+  async uploadPod(freightDriverId: number, loadId: number, file: Express.Multer.File) {
+    const load = await this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+    if (!load) throw new NotFoundException('Load not found');
+    if (load.driverId !== freightDriverId) throw new ForbiddenException('Access denied');
+
+    const url = await uploadBufferToS3('freight/pod', file.buffer, file.originalname, file.mimetype);
+
+    await this.prisma.freightLoad.update({
+      where: { id: loadId },
+      data: { podUrl: url, podUploadedAt: new Date(), status: 'pod_received' },
+    });
+    await this.prisma.freightMilestone.create({ data: { loadId, milestone: 'pod_uploaded' } });
+
+    return { podUrl: url };
+  }
+
+  // ── Billing: get invoice data for preview ────────────────
+  async getInvoiceData(loadId: number) {
+    const load = await this.prisma.freightLoad.findUnique({
+      where: { id: loadId },
+      include: { driver: true, truck: true },
+    });
+    if (!load) throw new NotFoundException('Load not found');
+    return load;
+  }
+
+  // ── Billing: send invoice email ──────────────────────────
+  async sendInvoice(
+    loadId: number,
+    invoicePdfBuffer: Buffer,
+    extraDocBuffer: Buffer | null,
+    extraDocName: string | null,
+    body: {
+      recipientEmail: string;
+      billingCompany: string;
+      billingContact: string;
+      billingPhone: string;
+      paymentTerms: string;
+      notes: string;
+      amount?: string;
+    },
+  ) {
+    const load = await this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+    if (!load) throw new NotFoundException('Load not found');
+    if (!body.recipientEmail) throw new BadRequestException('Recipient email is required');
+
+    // Auto-generate next invoice number
+    const last = await this.prisma.freightLoad.findFirst({
+      where: { invoiceNumber: { not: null } },
+      orderBy: { invoiceNumber: 'desc' },
+      select: { invoiceNumber: true },
+    });
+    const nextNum = last?.invoiceNumber ? (parseInt(last.invoiceNumber, 10) + 1) : 6257;
+    const invoiceNumber = String(nextNum);
+
+    // Calculate due date from payment terms (e.g. "Net 30" → +30 days)
+    const today = new Date();
+    const daysMatch = (body.paymentTerms ?? 'Net 30').match(/\d+/);
+    const days = daysMatch ? parseInt(daysMatch[0], 10) : 30;
+    const dueDate = new Date(today);
+    dueDate.setDate(dueDate.getDate() + days);
+
+    const amount = body.amount ? parseFloat(body.amount) : (load.agreedRate ?? 0);
+
+    // Build attachments
+    const attachments: { filename: string; content: Buffer }[] = [
+      { filename: `Invoice-${invoiceNumber}.pdf`, content: invoicePdfBuffer },
+    ];
+    if (extraDocBuffer && extraDocName) {
+      attachments.push({ filename: extraDocName, content: extraDocBuffer });
+    }
+    // Auto-attach POD if available
+    if (load.podUrl) {
+      try {
+        const podRes = await fetch(load.podUrl);
+        if (podRes.ok) {
+          const podBuf = Buffer.from(await podRes.arrayBuffer());
+          const podExt = load.podUrl.split('?')[0].split('.').pop() ?? 'jpg';
+          attachments.push({ filename: `POD-${load.loadNumber ?? load.id}.${podExt}`, content: podBuf });
+        }
+      } catch {
+        // POD fetch failure is non-fatal — proceed without it
+      }
+    }
+
+    // Email HTML
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+        <div style="background:#1e3a8a;padding:20px 24px;">
+          <h2 style="color:#fff;margin:0;font-size:18px;">Expedited Transport Services LLC</h2>
+        </div>
+        <div style="padding:24px;">
+          <p style="font-size:15px;color:#111;">Dear ${body.billingContact || body.billingCompany},</p>
+          <p style="color:#374151;">Please find attached Invoice <strong>#${invoiceNumber}</strong> for load <strong>${load.loadNumber ?? `#${load.id}`}</strong>.</p>
+          <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+            <tr><td style="padding:8px;color:#6b7280;font-size:13px;">Invoice No.</td><td style="padding:8px;font-weight:700;">${invoiceNumber}</td></tr>
+            <tr style="background:#f9fafb;"><td style="padding:8px;color:#6b7280;font-size:13px;">Amount</td><td style="padding:8px;font-weight:700;color:#e91e8c;">$${amount.toFixed(2)}</td></tr>
+            <tr><td style="padding:8px;color:#6b7280;font-size:13px;">Payment Terms</td><td style="padding:8px;">${body.paymentTerms || 'Net 30'}</td></tr>
+            <tr style="background:#f9fafb;"><td style="padding:8px;color:#6b7280;font-size:13px;">Due Date</td><td style="padding:8px;">${dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</td></tr>
+          </table>
+          ${body.notes ? `<p style="color:#374151;font-size:13px;"><strong>Notes:</strong> ${body.notes}</p>` : ''}
+          <p style="color:#374151;">Please remit payment by the due date. Thank you for your business.</p>
+          <p style="color:#6b7280;font-size:12px;margin-top:24px;">Expedited Transport Services LLC · 268 Trout Brook Dr., West Hartford, CT 06110<br/>c.taveras@expeditedtransportservices.net · www.expeditedtransportservices.net</p>
+        </div>
+      </div>`;
+
+    try {
+      await this.mail.sendWithAttachments(body.recipientEmail, `Invoice #${invoiceNumber} — ${load.loadNumber ?? `Load #${load.id}`}`, html, attachments);
+    } catch (e: any) {
+      throw new InternalServerErrorException(e.message ?? 'Failed to send invoice email');
+    }
+
+    // Update load record
+    await this.prisma.freightLoad.update({
+      where: { id: loadId },
+      data: {
+        invoiceNumber,
+        invoiceAmount: amount,
+        invoiceDate: today,
+        invoiceSentAt: today,
+        invoiceRecipients: body.recipientEmail,
+        invoiceNotes: body.notes || null,
+        paymentTerms: body.paymentTerms || 'Net 30',
+        paymentDueDate: dueDate,
+        billingStatus: 'sent',
+        billingCompany: body.billingCompany || null,
+        billingContact: body.billingContact || null,
+        billingEmail: body.recipientEmail,
+        billingPhone: body.billingPhone || null,
+        status: 'invoiced',
+      },
+    });
+
+    return { invoiceNumber, amount, dueDate, sentTo: body.recipientEmail };
+  }
+}

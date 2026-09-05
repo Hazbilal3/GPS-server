@@ -30,6 +30,7 @@ import { DriverNotificationsModule } from './driver-notifications/driver-notific
 import { AvailableDriversModule } from './available-drivers/available-drivers.module';
 import { MailModule } from './mail/mail.module';
 import { AgreementsModule } from './agreements/agreements.module';
+import { FreightModule } from './freight/freight.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { AgreementsModule } from './agreements/agreements.module';
     AvailableDriversModule,
     MailModule,
     AgreementsModule,
+    FreightModule,
   ],
   controllers: [
     UploadController,

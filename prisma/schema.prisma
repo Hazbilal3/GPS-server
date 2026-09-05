@@ -403,3 +403,248 @@ model DriverAgreement {
   @@unique([userId, agreementType])
   @@index([userId])
 }
+
+// ─────────────────────────────────────────────
+// EXPEDITED / FREIGHT MODULE (separate from Last Mile)
+// ─────────────────────────────────────────────
+
+model FreightDriver {
+  id            Int      @id @default(autoincrement())
+  name          String
+  email         String?  @unique
+  passwordHash  String?  // set by admin to enable driver login
+  phone         String?
+  licenseNumber String?
+  licenseExpiry DateTime?
+  status        String   @default("active") // "active" | "inactive"
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  loads       FreightLoad[]
+  clockSessions FreightClockSession[]
+  preTripInspections FreightPreTrip[]
+}
+
+model FreightTruck {
+  id           Int      @id @default(autoincrement())
+  name         String   // e.g. "Truck 1", "Van A"
+  type         String   // "cargo_van" | "box_truck_16" | "box_truck_26" | "semi"
+  plateNumber  String?
+  status       String   @default("active") // "active" | "inactive" | "maintenance"
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  loads        FreightLoad[]
+  clockSessions FreightClockSession[]
+}
+
+model FreightLoad {
+  id              Int      @id @default(autoincrement())
+
+  // Order info
+  loadNumber        String?
+  company           String?  // "BTX" | "BOL_OKEE" | "BOL_MERGE" | "RATE_CON"
+  orig              String?  // origin airport/hub code
+  dest              String?  // destination airport/hub code
+  serviceType       String?  // "Next Day" | "Same Day" | "Ground" etc.
+  shipmentValue     String?  // e.g. "NVD" or "$1200"
+  agreedRate        Float?
+  driverPay         Float?
+
+  // Pickup (Shipper)
+  pickupCompany     String?
+  pickupAddress     String?
+  pickupCity        String?
+  pickupState       String?
+  pickupZip         String?
+  pickupPhone       String?
+  pickupContact     String?
+  pickupDate        DateTime?
+  pickupReadyTime   String?  // HH:MM
+  pickupCloseTime   String?  // HH:MM
+  pickupNotes       String?
+
+  // Delivery (Consignee)
+  deliveryCompany   String?
+  deliveryAddress   String?
+  deliveryCity      String?
+  deliveryState     String?
+  deliveryZip       String?
+  deliveryContact   String?
+  deliveryDate      DateTime?   // delivery deadline date
+  deliveryTime      String?     // delivery deadline time e.g. "17:00"
+  deliveryOpenTime  String?     // HH:MM
+  deliveryCloseTime String?     // HH:MM
+  deliveryNotes     String?
+
+  // References
+  poNumber          String?
+  soNumber          String?
+  invoiceRef        String?
+  reference1        String?
+  reference2        String?
+  reference3        String?
+
+  // Additional services & instructions
+  additionalServices String?   // comma-separated e.g. "Liftgate DL, Packaging Disposal"
+  specialInstructions String?
+
+  // Cargo (single row)
+  pieces            Int?
+  weight            Float?
+  cargoLength       Float?
+  cargoWidth        Float?
+  cargoHeight       Float?
+  cargoExt          Float?
+  cargoDim          String?
+  packageType       String?
+  commodity         String?  // cargo description
+
+  internalNotes     String?
+
+  // Assignment
+  driverId         Int?
+  truckId          Int?
+  driver           FreightDriver? @relation(fields: [driverId], references: [id])
+  truck            FreightTruck?  @relation(fields: [truckId], references: [id])
+
+  // Status flow
+  status           String   @default("unassigned")
+  // unassigned → assigned → pre_trip_required → pre_trip_complete → clocked_in →
+  // en_route_pickup → at_pickup → loaded → in_transit → at_delivery →
+  // delivered → pod_required → pod_received → ready_for_billing →
+  // invoice_review → invoiced → awaiting_payment → payment_overdue → paid → closed
+
+  // Delivery outcome
+  deliveredInFull  Boolean?
+  deliveryException Boolean? @default(false)
+  exceptionNotes   String?
+
+  // POD
+  podUrl           String?  // uploaded proof of delivery
+  podUploadedAt    DateTime?
+
+  // Billing
+  invoiceNumber    String?
+  invoiceAmount    Float?
+  invoiceDate      DateTime?
+  invoiceSentAt    DateTime?
+  invoiceRecipients String?
+  invoiceNotes     String?
+  paymentTerms     String?  // "Net 15" | "Net 21" | "Net 30" | "Net 45"
+  paymentDueDate   DateTime?
+  amountPaid       Float?   @default(0)
+  paidAt           DateTime?
+  billingStatus    String?  // "draft" | "sent" | "partial" | "paid" | "disputed"
+  // Billing contact (Invoice for section)
+  billingCompany   String?
+  billingContact   String?
+  billingEmail     String?
+  billingPhone     String?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  clockSessions    FreightClockSession[]
+  milestones       FreightMilestone[]
+  preTripInspections FreightPreTrip[]
+  documents        FreightDocument[]
+
+  @@index([status])
+  @@index([driverId])
+}
+
+model FreightPreTrip {
+  id         Int      @id @default(autoincrement())
+  loadId     Int
+  driverId   Int
+  load       FreightLoad   @relation(fields: [loadId], references: [id])
+  driver     FreightDriver @relation(fields: [driverId], references: [id])
+
+  // YES/NO safety checks (true = pass, false = fail)
+  license           Boolean?
+  medicalCard       Boolean?
+  registration      Boolean?
+  insurance         Boolean?
+  logbookEld        Boolean?
+  lights            Boolean?
+  horn              Boolean?
+  tires             Boolean?
+  lugNuts           Boolean?
+  windshield        Boolean?
+  wipers            Boolean?
+  washerFluid       Boolean?
+  mirrors           Boolean?
+  brakes            Boolean?
+  leaks             Boolean?
+  fuel              Boolean?
+  // Equipment checks
+  bolPaperwork      Boolean?
+  palletJack        Boolean?
+  strapsSecurement  Boolean?
+
+  passed     Boolean  @default(false) // true only if no serious safety fail
+  notes      String?
+  completedAt DateTime @default(now())
+
+  @@index([loadId])
+  @@index([driverId])
+}
+
+model FreightClockSession {
+  id         Int      @id @default(autoincrement())
+  loadId     Int
+  driverId   Int
+  truckId    Int?
+  load       FreightLoad   @relation(fields: [loadId], references: [id])
+  driver     FreightDriver @relation(fields: [driverId], references: [id])
+  truck      FreightTruck? @relation(fields: [truckId], references: [id])
+
+  clockInAt   DateTime
+  clockInLat  Float?
+  clockInLng  Float?
+  clockOutAt  DateTime?
+  clockOutLat Float?
+  clockOutLng Float?
+  totalMinutes Int?
+
+  // Admin correction log (JSON array of corrections)
+  corrections Json?   // [{ originalIn, originalOut, correctedIn, correctedOut, adminId, reason, at }]
+
+  createdAt   DateTime @default(now())
+
+  @@index([loadId])
+  @@index([driverId])
+}
+
+model FreightMilestone {
+  id         Int      @id @default(autoincrement())
+  loadId     Int
+  load       FreightLoad @relation(fields: [loadId], references: [id])
+
+  milestone  String   // "clocked_in" | "en_route_pickup" | "arrived_pickup" | "loaded" |
+                      // "departed_pickup" | "in_transit" | "arrived_delivery" |
+                      // "delivered" | "pod_uploaded" | "clocked_out"
+  recordedAt DateTime @default(now())
+  lat        Float?
+  lng        Float?
+  notes      String?
+
+  @@index([loadId])
+}
+
+model FreightDocument {
+  id          Int      @id @default(autoincrement())
+  loadId      Int
+  load        FreightLoad @relation(fields: [loadId], references: [id])
+
+  type        String   // "rate_confirmation" | "bol" | "pod" | "invoice" | "other"
+  fileUrl     String
+  fileName    String
+  uploadedAt  DateTime @default(now())
+  notes       String?
+
+  @@index([loadId])
+}

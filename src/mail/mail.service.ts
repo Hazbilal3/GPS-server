@@ -14,4 +14,24 @@ export class MailService {
       throw new Error(error.message);
     }
   }
+
+  async sendWithAttachments(
+    to: string | string[],
+    subject: string,
+    html: string,
+    attachments: { filename: string; content: Buffer }[],
+  ): Promise<void> {
+    const { error } = await this.resend.emails.send({
+      from: this.from,
+      to,
+      subject,
+      html,
+      attachments: attachments.map(a => ({ filename: a.filename, content: a.content })),
+    });
+    if (error) {
+      const msg = `${error.name ?? 'ResendError'}: ${error.message}`;
+      this.logger.error(`Resend sendWithAttachments to ${to}: ${msg}`);
+      throw new Error(msg);
+    }
+  }
 }
