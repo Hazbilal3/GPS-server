@@ -366,6 +366,8 @@ model DriverPool {
   docUrl           String?
   status           String    @default("pending") // "pending" | "approved" | "rejected"
   assignedDriverId Int?
+  openforceInvite  Boolean   @default(false)
+  gustoInvite      Boolean   @default(false)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -416,14 +418,18 @@ model FreightDriver {
   phone         String?
   licenseNumber String?
   licenseExpiry DateTime?
+  hourlyRate    Float?   // used to auto-calculate driver pay on POD submission
   status        String   @default("active") // "active" | "inactive"
   notes         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  loads       FreightLoad[]
-  clockSessions FreightClockSession[]
+  loads              FreightLoad[]
+  clockSessions      FreightClockSession[]
   preTripInspections FreightPreTrip[]
+  disputes           FreightDriverDispute[]
+  notifications      FreightDriverNotification[]
+  expenses           FreightLoadExpense[]
 }
 
 model FreightTruck {
@@ -551,6 +557,7 @@ model FreightLoad {
   milestones       FreightMilestone[]
   preTripInspections FreightPreTrip[]
   documents        FreightDocument[]
+  expenses         FreightLoadExpense[]
 
   @@index([status])
   @@index([driverId])
@@ -560,7 +567,7 @@ model FreightPreTrip {
   id         Int      @id @default(autoincrement())
   loadId     Int
   driverId   Int
-  load       FreightLoad   @relation(fields: [loadId], references: [id])
+  load       FreightLoad   @relation(fields: [loadId], references: [id], onDelete: Cascade)
   driver     FreightDriver @relation(fields: [driverId], references: [id])
 
   // YES/NO safety checks (true = pass, false = fail)
@@ -598,7 +605,7 @@ model FreightClockSession {
   loadId     Int
   driverId   Int
   truckId    Int?
-  load       FreightLoad   @relation(fields: [loadId], references: [id])
+  load       FreightLoad   @relation(fields: [loadId], references: [id], onDelete: Cascade)
   driver     FreightDriver @relation(fields: [driverId], references: [id])
   truck      FreightTruck? @relation(fields: [truckId], references: [id])
 
@@ -622,7 +629,7 @@ model FreightClockSession {
 model FreightMilestone {
   id         Int      @id @default(autoincrement())
   loadId     Int
-  load       FreightLoad @relation(fields: [loadId], references: [id])
+  load       FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
 
   milestone  String   // "clocked_in" | "en_route_pickup" | "arrived_pickup" | "loaded" |
                       // "departed_pickup" | "in_transit" | "arrived_delivery" |
@@ -638,7 +645,7 @@ model FreightMilestone {
 model FreightDocument {
   id          Int      @id @default(autoincrement())
   loadId      Int
-  load        FreightLoad @relation(fields: [loadId], references: [id])
+  load        FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
 
   type        String   // "rate_confirmation" | "bol" | "pod" | "invoice" | "other"
   fileUrl     String
@@ -647,4 +654,58 @@ model FreightDocument {
   notes       String?
 
   @@index([loadId])
+}
+
+model FreightLoadExpense {
+  id              Int           @id @default(autoincrement())
+  loadId          Int
+  load            FreightLoad   @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  freightDriverId Int
+  driver          FreightDriver @relation(fields: [freightDriverId], references: [id])
+  description     String
+  amount          Float
+  createdAt       DateTime      @default(now())
+
+  @@index([loadId])
+  @@index([freightDriverId])
+}
+
+model FreightDriverDispute {
+  id              Int           @id @default(autoincrement())
+  freightDriverId Int
+  driver          FreightDriver @relation(fields: [freightDriverId], references: [id])
+  subject         String
+  status          String        @default("open") // open | in_review | resolved | closed
+  adminNotes      String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  messages        FreightDisputeMessage[]
+
+  @@index([freightDriverId])
+  @@index([status])
+}
+
+model FreightDisputeMessage {
+  id         Int                  @id @default(autoincrement())
+  disputeId  Int
+  dispute    FreightDriverDispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  senderRole String               // "driver" | "admin"
+  senderName String
+  content    String
+  createdAt  DateTime             @default(now())
+
+  @@index([disputeId])
+}
+
+model FreightDriverNotification {
+  id              Int           @id @default(autoincrement())
+  freightDriverId Int
+  driver          FreightDriver @relation(fields: [freightDriverId], references: [id])
+  title           String
+  body            String
+  isRead          Boolean       @default(false)
+  type            String        @default("general") // general | load | dispute | payment
+  createdAt       DateTime      @default(now())
+
+  @@index([freightDriverId])
 }

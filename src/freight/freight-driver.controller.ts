@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Param, Body, Request,
+  Controller, Get, Post, Patch, Delete, Param, Body, Request,
   ParseIntPipe, UseGuards, UseInterceptors, UploadedFile, BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -15,6 +15,11 @@ export class FreightDriverController {
   @Get('me')
   getProfile(@Request() req: any) {
     return this.service.getDriverProfile(req.user.freightDriverId);
+  }
+
+  @Get('me/settlement')
+  getSettlement(@Request() req: any) {
+    return this.service.getDriverSettlement(req.user.freightDriverId);
   }
 
   @Get('me/loads')
@@ -65,5 +70,75 @@ export class FreightDriverController {
   ) {
     if (!file) throw new BadRequestException('file is required');
     return this.service.uploadPod(req.user.freightDriverId, id, file);
+  }
+
+  // ── Load Expenses ─────────────────────────────────────────
+
+  @Get('me/loads/:id/expenses')
+  getExpenses(@Request() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.service.getLoadExpenses(req.user.freightDriverId, id);
+  }
+
+  @Post('me/loads/:id/expenses')
+  addExpense(
+    @Request() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body('description') description: string,
+    @Body('amount') amount: any,
+  ) {
+    if (!description) throw new BadRequestException('description is required');
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt <= 0) throw new BadRequestException('amount must be a positive number');
+    return this.service.addLoadExpense(req.user.freightDriverId, id, description, amt);
+  }
+
+  @Delete('me/loads/:id/expenses/:expenseId')
+  deleteExpense(
+    @Request() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('expenseId', ParseIntPipe) expenseId: number,
+  ) {
+    return this.service.deleteLoadExpense(req.user.freightDriverId, id, expenseId);
+  }
+
+  // ── Disputes ──────────────────────────────────────────────
+
+  @Get('me/disputes')
+  getDisputes(@Request() req: any) {
+    return this.service.getFreightDriverDisputes(req.user.freightDriverId);
+  }
+
+  @Post('me/disputes')
+  createDispute(@Request() req: any, @Body() body: any) {
+    if (!body.subject) throw new BadRequestException('subject is required');
+    if (!body.message) throw new BadRequestException('message is required');
+    return this.service.createFreightDriverDispute(req.user.freightDriverId, body);
+  }
+
+  @Post('me/disputes/:id/messages')
+  sendMessage(
+    @Request() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body('content') content: string,
+  ) {
+    if (!content) throw new BadRequestException('content is required');
+    return this.service.sendFreightDisputeMessage(req.user.freightDriverId, id, content);
+  }
+
+  // ── Notifications ─────────────────────────────────────────
+
+  @Get('me/notifications')
+  getNotifications(@Request() req: any) {
+    return this.service.getFreightDriverNotifications(req.user.freightDriverId);
+  }
+
+  @Patch('me/notifications/read-all')
+  markAllRead(@Request() req: any) {
+    return this.service.markAllFreightNotificationsRead(req.user.freightDriverId);
+  }
+
+  @Patch('me/notifications/:id/read')
+  markRead(@Request() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.service.markFreightNotificationRead(req.user.freightDriverId, id);
   }
 }

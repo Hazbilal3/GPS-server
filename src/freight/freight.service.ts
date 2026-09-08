@@ -392,6 +392,14 @@ export class FreightService {
 
   // ── Dashboard Stats ──────────────────────────────────────
   async getDashboardStats() {
+    const now = new Date();
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd   = new Date(now); todayEnd.setHours(23, 59, 59, 999);
+
+    // Last 7 days window
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(weekStart.getDate() - 6);
+
     const [
       activeLoads,
       todayPickups,
@@ -399,25 +407,20 @@ export class FreightService {
       missingPods,
       readyToBill,
       totalAR,
+      totalPaid,
+      statusGroups,
+      recentLoads,
+      weekPickups,
+      weekDeliveries,
     ] = await Promise.all([
       this.prisma.freightLoad.count({
         where: { status: { notIn: ['paid', 'closed', 'unassigned'] } },
       }),
       this.prisma.freightLoad.count({
-        where: {
-          pickupDate: {
-            gte: new Date(new Date().setHours(0, 0, 0, 0)),
-            lte: new Date(new Date().setHours(23, 59, 59, 999)),
-          },
-        },
+        where: { pickupDate: { gte: todayStart, lte: todayEnd } },
       }),
       this.prisma.freightLoad.count({
-        where: {
-          deliveryDate: {
-            gte: new Date(new Date().setHours(0, 0, 0, 0)),
-            lte: new Date(new Date().setHours(23, 59, 59, 999)),
-          },
-        },
+        where: { deliveryDate: { gte: todayStart, lte: todayEnd } },
       }),
       this.prisma.freightLoad.count({ where: { status: 'delivered', podUrl: null } }),
       this.prisma.freightLoad.count({ where: { status: { in: ['pod_received', 'ready_for_billing'] } } }),
@@ -425,7 +428,57 @@ export class FreightService {
         where: { billingStatus: { in: ['sent', 'partial'] } },
         _sum: { invoiceAmount: true },
       }),
+      this.prisma.freightLoad.aggregate({
+        where: { billingStatus: 'paid' },
+        _sum: { invoiceAmount: true },
+      }),
+      this.prisma.freightLoad.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+      this.prisma.freightLoad.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 6,
+        select: {
+          id: true,
+          loadNumber: true,
+          status: true,
+          orig: true,
+          dest: true,
+          pickupCity: true,
+          pickupState: true,
+          deliveryCity: true,
+          deliveryState: true,
+          pickupDate: true,
+          invoiceAmount: true,
+          driver: { select: { name: true } },
+        },
+      }),
+      // Weekly pickups per day
+      this.prisma.freightLoad.findMany({
+        where: { pickupDate: { gte: weekStart, lte: todayEnd } },
+        select: { pickupDate: true },
+      }),
+      // Weekly deliveries per day
+      this.prisma.freightLoad.findMany({
+        where: { deliveryDate: { gte: weekStart, lte: todayEnd } },
+        select: { deliveryDate: true },
+      }),
     ]);
+
+    // Build 7-day trend array
+    const days: { label: string; pickups: number; deliveries: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(todayStart);
+      d.setDate(d.getDate() - i);
+      const dStr = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString('en-US', { weekday: 'short' });
+      days.push({
+        label,
+        pickups:    weekPickups.filter(r    => r.pickupDate?.toISOString().slice(0, 10) === dStr).length,
+        deliveries: weekDeliveries.filter(r => r.deliveryDate?.toISOString().slice(0, 10) === dStr).length,
+      });
+    }
 
     return {
       activeLoads,
@@ -433,7 +486,11 @@ export class FreightService {
       todayDeliveries,
       missingPods,
       readyToBill,
-      totalAR: totalAR._sum.invoiceAmount ?? 0,
+      totalAR:    totalAR._sum.invoiceAmount ?? 0,
+      totalPaid:  totalPaid._sum.invoiceAmount ?? 0,
+      statusBreakdown: statusGroups.map(g => ({ status: g.status, count: g._count._all })),
+      weeklyTrend: days,
+      recentLoads,
     };
   }
 
@@ -452,10 +509,36 @@ export class FreightService {
   async getDriverProfile(freightDriverId: number) {
     const driver = await this.prisma.freightDriver.findUnique({
       where: { id: freightDriverId },
-      select: { id: true, name: true, email: true, phone: true, licenseNumber: true, status: true },
+      select: { id: true, name: true, email: true, phone: true, licenseNumber: true, hourlyRate: true, status: true },
     });
     if (!driver) throw new NotFoundException('Driver not found');
     return driver;
+  }
+
+  // ── Driver: settlement (payroll summary) ──────────────────
+  async getDriverSettlement(freightDriverId: number) {
+    const loads = await this.prisma.freightLoad.findMany({
+      where: {
+        driverId: freightDriverId,
+        status: { in: ['pod_received', 'ready_for_billing', 'invoice_review', 'invoiced', 'awaiting_payment', 'payment_overdue', 'paid', 'closed'] },
+      },
+      select: {
+        id: true, loadNumber: true, status: true,
+        pickupCompany: true, deliveryCompany: true,
+        pickupCity: true, deliveryCity: true,
+        pickupDate: true, deliveryDate: true,
+        driverPay: true, paidAt: true, createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const paid     = loads.filter(l => l.status === 'paid' || l.status === 'closed');
+    const pending  = loads.filter(l => l.status !== 'paid' && l.status !== 'closed');
+
+    const totalPaid    = paid.reduce((s, l) => s + (l.driverPay ?? 0), 0);
+    const totalPending = pending.reduce((s, l) => s + (l.driverPay ?? 0), 0);
+
+    return { loads, summary: { totalLoads: loads.length, totalPaid, totalPending } };
   }
 
   // ── Driver: my loads ──────────────────────────────────────
@@ -582,19 +665,44 @@ export class FreightService {
 
   // ── Driver: upload POD ───────────────────────────────────
   async uploadPod(freightDriverId: number, loadId: number, file: Express.Multer.File) {
-    const load = await this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+    const load = await this.prisma.freightLoad.findUnique({
+      where: { id: loadId },
+      include: { driver: true },
+    });
     if (!load) throw new NotFoundException('Load not found');
     if (load.driverId !== freightDriverId) throw new ForbiddenException('Access denied');
 
     const url = await uploadBufferToS3('freight/pod', file.buffer, file.originalname, file.mimetype);
+    const podUploadedAt = new Date();
+
+    // Auto-calculate driver pay from hourly rate × actual hours worked
+    let calculatedDriverPay: number | undefined;
+    if (load.driver?.hourlyRate) {
+      const sessions = await this.prisma.freightClockSession.findMany({ where: { loadId } });
+      const totalMinutes = sessions.reduce((sum, s) => {
+        if (s.totalMinutes != null) return sum + s.totalMinutes;
+        // Session still open — count to POD upload time
+        if (!s.clockOutAt) {
+          return sum + Math.round((podUploadedAt.getTime() - s.clockInAt.getTime()) / 60000);
+        }
+        return sum;
+      }, 0);
+      const hours = totalMinutes / 60;
+      calculatedDriverPay = Math.round(hours * load.driver.hourlyRate * 100) / 100;
+    }
 
     await this.prisma.freightLoad.update({
       where: { id: loadId },
-      data: { podUrl: url, podUploadedAt: new Date(), status: 'pod_received' },
+      data: {
+        podUrl: url,
+        podUploadedAt,
+        status: 'pod_received',
+        ...(calculatedDriverPay != null ? { driverPay: calculatedDriverPay } : {}),
+      },
     });
     await this.prisma.freightMilestone.create({ data: { loadId, milestone: 'pod_uploaded' } });
 
-    return { podUrl: url };
+    return { podUrl: url, driverPay: calculatedDriverPay };
   }
 
   // ── Billing: get invoice data for preview ────────────────
@@ -623,7 +731,10 @@ export class FreightService {
       amount?: string;
     },
   ) {
-    const load = await this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+    const load = await this.prisma.freightLoad.findUnique({
+      where: { id: loadId },
+      include: { documents: true },
+    });
     if (!load) throw new NotFoundException('Load not found');
     if (!body.recipientEmail) throw new BadRequestException('Recipient email is required');
 
@@ -649,8 +760,19 @@ export class FreightService {
     const attachments: { filename: string; content: Buffer }[] = [
       { filename: `Invoice-${invoiceNumber}.pdf`, content: invoicePdfBuffer },
     ];
-    if (extraDocBuffer && extraDocName) {
-      attachments.push({ filename: extraDocName, content: extraDocBuffer });
+    // Auto-attach order documents (rate confirmations, BOLs, etc.)
+    const orderDocs = load.documents ?? [];
+    for (const doc of orderDocs) {
+      if (doc.type === 'invoice') continue; // skip previously generated invoices
+      try {
+        const docRes = await fetch(doc.fileUrl);
+        if (docRes.ok) {
+          const docBuf = Buffer.from(await docRes.arrayBuffer());
+          attachments.push({ filename: doc.fileName, content: docBuf });
+        }
+      } catch {
+        // non-fatal — skip this document
+      }
     }
     // Auto-attach POD if available
     if (load.podUrl) {
@@ -664,6 +786,10 @@ export class FreightService {
       } catch {
         // POD fetch failure is non-fatal — proceed without it
       }
+    }
+    // Manually attached admin document
+    if (extraDocBuffer && extraDocName) {
+      attachments.push({ filename: extraDocName, content: extraDocBuffer });
     }
 
     // Email HTML
@@ -715,5 +841,141 @@ export class FreightService {
     });
 
     return { invoiceNumber, amount, dueDate, sentTo: body.recipientEmail };
+  }
+
+  // ── Driver: load expenses ────────────────────────────────
+
+  async getLoadExpenses(freightDriverId: number, loadId: number) {
+    const load = await this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+    if (!load) throw new NotFoundException('Load not found');
+    if (load.driverId !== freightDriverId) throw new ForbiddenException('Access denied');
+    return this.prisma.freightLoadExpense.findMany({
+      where: { loadId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async addLoadExpense(freightDriverId: number, loadId: number, description: string, amount: number) {
+    const load = await this.prisma.freightLoad.findUnique({ where: { id: loadId } });
+    if (!load) throw new NotFoundException('Load not found');
+    if (load.driverId !== freightDriverId) throw new ForbiddenException('Access denied');
+    return this.prisma.freightLoadExpense.create({
+      data: { loadId, freightDriverId, description, amount },
+    });
+  }
+
+  async deleteLoadExpense(freightDriverId: number, loadId: number, expenseId: number) {
+    const expense = await this.prisma.freightLoadExpense.findUnique({ where: { id: expenseId } });
+    if (!expense) throw new NotFoundException('Expense not found');
+    if (expense.freightDriverId !== freightDriverId || expense.loadId !== loadId) throw new ForbiddenException('Access denied');
+    return this.prisma.freightLoadExpense.delete({ where: { id: expenseId } });
+  }
+
+  // ── Freight Driver Disputes ──────────────────────────────
+
+  async getFreightDriverDisputes(freightDriverId: number) {
+    return this.prisma.freightDriverDispute.findMany({
+      where: { freightDriverId },
+      include: { messages: { orderBy: { createdAt: 'asc' } } },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async createFreightDriverDispute(freightDriverId: number, body: { subject: string; message: string }) {
+    const driver = await this.prisma.freightDriver.findUnique({
+      where: { id: freightDriverId }, select: { name: true },
+    });
+    if (!driver) throw new NotFoundException('Driver not found');
+    const dispute = await this.prisma.freightDriverDispute.create({
+      data: {
+        freightDriverId,
+        subject: body.subject,
+        messages: {
+          create: {
+            senderRole: 'driver',
+            senderName: driver.name,
+            content: body.message,
+          },
+        },
+      },
+      include: { messages: true },
+    });
+    return dispute;
+  }
+
+  async sendFreightDisputeMessage(freightDriverId: number, disputeId: number, content: string) {
+    const dispute = await this.prisma.freightDriverDispute.findUnique({ where: { id: disputeId } });
+    if (!dispute) throw new NotFoundException('Dispute not found');
+    if (dispute.freightDriverId !== freightDriverId) throw new ForbiddenException('Access denied');
+    const driver = await this.prisma.freightDriver.findUnique({
+      where: { id: freightDriverId }, select: { name: true },
+    });
+    const msg = await this.prisma.freightDisputeMessage.create({
+      data: { disputeId, senderRole: 'driver', senderName: driver!.name, content },
+    });
+    await this.prisma.freightDriverDispute.update({
+      where: { id: disputeId }, data: { updatedAt: new Date() },
+    });
+    return msg;
+  }
+
+  // ── Admin: freight dispute management ───────────────────────
+
+  async getFreightDisputes() {
+    return this.prisma.freightDriverDispute.findMany({
+      include: {
+        driver: { select: { name: true, email: true } },
+        messages: { orderBy: { createdAt: 'asc' } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async updateFreightDisputeStatus(disputeId: number, status: string, adminNotes?: string) {
+    return this.prisma.freightDriverDispute.update({
+      where: { id: disputeId },
+      data: { status, adminNotes: adminNotes ?? undefined },
+    });
+  }
+
+  async sendFreightDisputeAdminMessage(disputeId: number, content: string) {
+    const msg = await this.prisma.freightDisputeMessage.create({
+      data: { disputeId, senderRole: 'admin', senderName: 'Admin', content },
+    });
+    await this.prisma.freightDriverDispute.update({
+      where: { id: disputeId }, data: { updatedAt: new Date() },
+    });
+    return msg;
+  }
+
+  // ── Freight Driver Notifications ─────────────────────────────
+
+  async getFreightDriverNotifications(freightDriverId: number) {
+    return this.prisma.freightDriverNotification.findMany({
+      where: { freightDriverId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async markFreightNotificationRead(freightDriverId: number, notificationId: number) {
+    const notif = await this.prisma.freightDriverNotification.findUnique({ where: { id: notificationId } });
+    if (!notif) throw new NotFoundException('Notification not found');
+    if (notif.freightDriverId !== freightDriverId) throw new ForbiddenException('Access denied');
+    return this.prisma.freightDriverNotification.update({
+      where: { id: notificationId }, data: { isRead: true },
+    });
+  }
+
+  async markAllFreightNotificationsRead(freightDriverId: number) {
+    await this.prisma.freightDriverNotification.updateMany({
+      where: { freightDriverId, isRead: false }, data: { isRead: true },
+    });
+    return { success: true };
+  }
+
+  async sendFreightDriverNotification(freightDriverId: number, title: string, body: string, type = 'general') {
+    return this.prisma.freightDriverNotification.create({
+      data: { freightDriverId, title, body, type },
+    });
   }
 }

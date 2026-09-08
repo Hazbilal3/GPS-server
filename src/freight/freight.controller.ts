@@ -152,4 +152,38 @@ export class FreightController {
   updateTruck(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
     return this.service.updateTruck(id, body);
   }
+
+  // ── Driver Disputes (admin) ───────────────────────────────
+  @Get('driver-disputes')
+  getFreightDisputes() {
+    return this.service.getFreightDisputes();
+  }
+
+  @Patch('driver-disputes/:id/status')
+  updateDisputeStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('status') status: string,
+    @Body('adminNotes') adminNotes?: string,
+  ) {
+    return this.service.updateFreightDisputeStatus(id, status, adminNotes);
+  }
+
+  @Post('driver-disputes/:id/messages')
+  adminDisputeMessage(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('content') content: string,
+  ) {
+    return this.service.sendFreightDisputeAdminMessage(id, content);
+  }
+
+  // ── Driver Notifications (admin) ──────────────────────────
+  @Post('driver-notifications')
+  sendNotification(@Body() body: any) {
+    return this.service.sendFreightDriverNotification(
+      parseInt(body.freightDriverId),
+      body.title,
+      body.body,
+      body.type ?? 'general',
+    );
+  }
 }

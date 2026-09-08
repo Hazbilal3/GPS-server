@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Param,
   Body,
   Query,
@@ -138,6 +139,24 @@ export class PoolController {
   @UseGuards(AuthGuard, AdminGuard)
   async getNextDriverId() {
     return this.service.getNextDriverId();
+  }
+
+  @Get('check-driver-id/:id')
+  @UseGuards(AuthGuard, AdminGuard)
+  async checkDriverId(@Param('id', ParseIntPipe) id: number) {
+    return this.service.checkDriverId(id);
+  }
+
+  @Patch(':id/openforce-invite')
+  @UseGuards(AuthGuard, AdminGuard)
+  async toggleOpenforceInvite(@Param('id', ParseIntPipe) id: number) {
+    return this.service.toggleOpenforceInvite(id);
+  }
+
+  @Patch(':id/gusto-invite')
+  @UseGuards(AuthGuard, AdminGuard)
+  async toggleGustoInvite(@Param('id', ParseIntPipe) id: number) {
+    return this.service.toggleGustoInvite(id);
   }
 
   @Get('all')
