@@ -293,6 +293,31 @@ export class PoolService {
     return { nextId: maxId + 1 };
   }
 
+  async checkDriverId(id: number): Promise<{ available: boolean }> {
+    const existing = await this.prisma.user.findFirst({ where: { driverId: id } });
+    return { available: !existing };
+  }
+
+  async toggleOpenforceInvite(id: number): Promise<{ openforceInvite: boolean }> {
+    const entry = await this.prisma.driverPool.findUnique({ where: { id } });
+    if (!entry) throw new NotFoundException('Pool entry not found.');
+    const updated = await this.prisma.driverPool.update({
+      where: { id },
+      data: { openforceInvite: !entry.openforceInvite },
+    });
+    return { openforceInvite: updated.openforceInvite };
+  }
+
+  async toggleGustoInvite(id: number): Promise<{ gustoInvite: boolean }> {
+    const entry = await this.prisma.driverPool.findUnique({ where: { id } });
+    if (!entry) throw new NotFoundException('Pool entry not found.');
+    const updated = await this.prisma.driverPool.update({
+      where: { id },
+      data: { gustoInvite: !entry.gustoInvite },
+    });
+    return { gustoInvite: updated.gustoInvite };
+  }
+
   async approve(id: number, assignedDriverId: number, salaryType?: string, fixedSalary?: number) {
     const entry = await this.prisma.driverPool.findUnique({ where: { id } });
     if (!entry) throw new NotFoundException('Pool entry not found.');
