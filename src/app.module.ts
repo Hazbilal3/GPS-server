@@ -4,7 +4,8 @@ import { UploadController } from './upload/upload.controller';
 import { ConfigModule } from '@nestjs/config';
 import { Module, ValidationPipe } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
-import { PrismaService } from './prisma.service';
+import { PrismaModule } from './prisma.module';
+import { VoxiqModule } from './voxiq/voxiq.module';
 import { ReportController } from './report/report.controller';
 import { ReportService } from './report/report.service';
 import { APP_GUARD, APP_PIPE } from '@nestjs/core';
@@ -34,6 +35,8 @@ import { AgreementsModule } from './agreements/agreements.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
+    VoxiqModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]),
     NotificationsModule,
@@ -62,7 +65,6 @@ import { AgreementsModule } from './agreements/agreements.module';
   ],
   providers: [
     UploadService,
-    PrismaService,
     PushService,
     ReportService,
     DriverService,

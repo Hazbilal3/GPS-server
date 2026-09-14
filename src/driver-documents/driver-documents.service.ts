@@ -16,6 +16,11 @@ export class DriverDocumentsService implements OnModuleInit {
    * storing User.id won't match any User.driverId and are untouched.
    */
   async onModuleInit() {
+    // This touches every driver/document record and can delay API startup for
+    // several minutes against a remote database. Run it explicitly once when
+    // a legacy data migration is required, not on each application boot.
+    if (process.env.RUN_DRIVER_DOCUMENT_ID_MIGRATION !== 'true') return;
+
     const users = await this.prisma.user.findMany({
       where: { driverId: { not: null } },
       select: { id: true, driverId: true },
