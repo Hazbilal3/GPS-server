@@ -1,0 +1,125 @@
+import {
+  BadGatewayException,
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import axios from 'axios';
+
+const APPROVED_OUTBOUND_NUMBERS = new Set(['+18605001016', '+19593333361']);
+const E164_PATTERN = /^\+[1-9]\d{7,14}$/;
+
+type LaunchSessionInput = {
+  destinationNumber?: unknown;
+  contactName?: unknown;
+  selectedOutboundNumber?: unknown;
+};
+
+@Injectable()
+export class VoxiqService {
+  private readonly logger = new Logger(VoxiqService.name);
+
+  async createLaunchSession(authenticatedUser: { sub?: unknown }, input: unknown) {
+    const request = this.validateRequest(input);
+    const userId = Number(authenticatedUser?.sub);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      throw new UnauthorizedException('Authentication is required.');
+    }
+
+    const { baseUrl, apiKey } = this.getConfiguration();
+    let response: { status: number; data?: { launchUrl?: unknown } };
+    try {
+      response = await axios.post(
+        new URL('/api/integrations/click-to-call/launch-session', baseUrl).toString(),
+        {
+          destinationNumber: request.destinationNumber,
+          contactName: request.contactName,
+          selectedOutboundNumber: request.selectedOutboundNumber,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 10_000,
+          validateStatus: () => true,
+        },
+      );
+    } catch {
+      throw new BadGatewayException('Unable to create a Voxiq call session.');
+    }
+
+    if (response.status === 404) {
+      throw new ServiceUnavailableException('Voxiq launch service is unavailable. Please contact your Voxiq administrator.');
+    }
+    if (response.status === 400) {
+      this.logger.warn('Voxiq rejected a click-to-call request (HTTP 400).');
+      throw new BadRequestException('Voxiq rejected this call request. Confirm the customer number and selected outgoing number.');
+    }
+    if (response.status === 401 || response.status === 403) {
+      this.logger.warn(`Voxiq integration authorization failed (HTTP ${response.status}).`);
+      throw new ServiceUnavailableException('Voxiq integration authorization failed. Please contact your Voxiq administrator.');
+    }
+    if (response.status === 429) {
+      this.logger.warn('Voxiq rate limit reached for click-to-call sessions.');
+      throw new HttpException('Too many Voxiq call requests. Please try again shortly.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    if (response.status < 200 || response.status >= 300 || !this.isSafeLaunchUrl(response.data?.launchUrl, baseUrl)) {
+      this.logger.warn(`Voxiq launch session failed (HTTP ${response.status}).`);
+      throw new BadGatewayException('Unable to create a Voxiq call session.');
+    }
+
+    return { launchUrl: response.data!.launchUrl as string };
+  }
+
+  private validateRequest(input: unknown) {
+    const body = (input && typeof input === 'object' ? input : {}) as LaunchSessionInput;
+    const destinationNumber = typeof body.destinationNumber === 'string' ? body.destinationNumber.trim() : '';
+    const contactName = typeof body.contactName === 'string' ? body.contactName.trim() : '';
+    const selectedOutboundNumber = typeof body.selectedOutboundNumber === 'string' ? body.selectedOutboundNumber.trim() : '';
+
+    if (!E164_PATTERN.test(destinationNumber)) {
+      throw new BadRequestException('A valid customer phone number is required.');
+    }
+    if (!APPROVED_OUTBOUND_NUMBERS.has(selectedOutboundNumber)) {
+      throw new BadRequestException('Select an approved outgoing number.');
+    }
+    if (!contactName || contactName.length > 200) {
+      throw new BadRequestException('A valid contact name is required.');
+    }
+    return { destinationNumber, contactName, selectedOutboundNumber };
+  }
+
+  private getConfiguration() {
+    const configuredBaseUrl = process.env.VOXIQ_BASE_URL;
+    const apiKey = process.env.VOXIQ_INTEGRATION_API_KEY;
+    if (!configuredBaseUrl || !apiKey) {
+      throw new ServiceUnavailableException('Voxiq integration is unavailable.');
+    }
+
+    let baseUrl: URL;
+    try {
+      baseUrl = new URL(configuredBaseUrl);
+    } catch {
+      throw new ServiceUnavailableException('Voxiq integration is unavailable.');
+    }
+    if (baseUrl.protocol !== 'https:') {
+      throw new ServiceUnavailableException('Voxiq integration is unavailable.');
+    }
+    return { baseUrl, apiKey };
+  }
+
+  private isSafeLaunchUrl(value: unknown, baseUrl: URL): value is string {
+    if (typeof value !== 'string') return false;
+    try {
+      const launchUrl = new URL(value);
+      return launchUrl.protocol === 'https:' && launchUrl.origin === baseUrl.origin && launchUrl.pathname === '/agent';
+    } catch {
+      return false;
+    }
+  }
+}
