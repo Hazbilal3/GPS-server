@@ -458,6 +458,8 @@ model FreightLoad {
   shipmentValue     String?  // e.g. "NVD" or "$1200"
   agreedRate        Float?
   driverPay         Float?
+  driverPayStatus   String?  // null = pending | "paid"
+  driverPaidAt      DateTime?
 
   // Pickup (Shipper)
   pickupCompany     String?
