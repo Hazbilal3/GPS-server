@@ -978,4 +978,44 @@ export class FreightService {
       data: { freightDriverId, title, body, type },
     });
   }
+
+  // ── Admin: Driver Payroll ────────────────────────────────
+
+  async getFreightPayroll() {
+    const loads = await this.prisma.freightLoad.findMany({
+      where: {
+        driverPay: { not: null },
+        driverId: { not: null },
+      },
+      select: {
+        id: true, loadNumber: true, status: true,
+        driverPay: true, driverPayStatus: true, driverPaidAt: true,
+        pickupCity: true, deliveryCity: true, pickupDate: true,
+        driver: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const paid    = loads.filter(l => l.driverPayStatus === 'paid');
+    const pending = loads.filter(l => l.driverPayStatus !== 'paid');
+
+    return {
+      loads,
+      summary: {
+        totalLoads: loads.length,
+        totalPaid:    paid.reduce((s, l) => s + (l.driverPay ?? 0), 0),
+        totalPending: pending.reduce((s, l) => s + (l.driverPay ?? 0), 0),
+      },
+    };
+  }
+
+  async setDriverPayStatus(loadId: number, status: 'paid' | 'pending') {
+    return this.prisma.freightLoad.update({
+      where: { id: loadId },
+      data: {
+        driverPayStatus: status === 'paid' ? 'paid' : null,
+        driverPaidAt:    status === 'paid' ? new Date() : null,
+      },
+    });
+  }
 }

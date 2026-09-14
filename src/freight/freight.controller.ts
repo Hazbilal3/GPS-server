@@ -153,6 +153,22 @@ export class FreightController {
     return this.service.updateTruck(id, body);
   }
 
+  // ── Driver Payroll (admin) ───────────────────────────────
+  @Get('payroll')
+  getFreightPayroll() {
+    return this.service.getFreightPayroll();
+  }
+
+  @Patch('payroll/:id/paid')
+  markDriverPaid(@Param('id', ParseIntPipe) id: number) {
+    return this.service.setDriverPayStatus(id, 'paid');
+  }
+
+  @Patch('payroll/:id/pending')
+  markDriverPending(@Param('id', ParseIntPipe) id: number) {
+    return this.service.setDriverPayStatus(id, 'pending');
+  }
+
   // ── Driver Disputes (admin) ───────────────────────────────
   @Get('driver-disputes')
   getFreightDisputes() {

@@ -19,6 +19,7 @@ async function bootstrap() {
       'https://www.expeditedtransport.net',
       'http://localhost:5173',
       'http://localhost:5174',
+      'http://192.168.18.249:5173',
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
