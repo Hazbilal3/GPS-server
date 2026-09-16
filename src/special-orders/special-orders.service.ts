@@ -415,6 +415,45 @@ export class SpecialOrdersService {
     });
   }
 
+  async view(id: number, driverId: number, driverName: string) {
+    const order = await this.prisma.specialOrder.findUnique({ where: { id } });
+    if (!order) return;
+    const current = (order.viewedBy as { id: number; name: string }[]) || [];
+    if (current.some(v => v.id === driverId)) return; // already recorded
+    await this.prisma.specialOrder.update({
+      where: { id },
+      data: { viewedBy: [...current, { id: driverId, name: driverName }] },
+    });
+  }
+
+  async getEngagement(id: number) {
+    const order = await this.prisma.specialOrder.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const viewed   = (order.viewedBy as { id: number; name: string }[]) || [];
+    const rejected = (order.rejectedBy as number[]) || [];
+
+    const rejectedDrivers = rejected.length
+      ? await this.prisma.user.findMany({
+          where: { driverId: { in: rejected } },
+          select: { driverId: true, fullName: true },
+        })
+      : [];
+
+    const rejectedList = rejected.map(rid => ({
+      id: rid,
+      name: rejectedDrivers.find(d => d.driverId === rid)?.fullName ?? `Driver #${rid}`,
+    }));
+
+    return {
+      viewed: viewed,
+      rejected: rejectedList,
+      accepted: order.acceptedBy
+        ? { id: order.acceptedBy, name: order.acceptedByName ?? `Driver #${order.acceptedBy}` }
+        : null,
+    };
+  }
+
   async remove(id: number) {
     const order = await this.prisma.specialOrder.findUnique({ where: { id } });
     if (!order) throw new NotFoundException('Order not found');

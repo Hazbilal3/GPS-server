@@ -155,6 +155,21 @@ export class SpecialOrdersController {
     return this.service.reject(id, body.driverId);
   }
 
+  @Patch(':id/view')
+  @UseGuards(AuthGuard)
+  view(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { driverId: number; driverName: string },
+  ) {
+    return this.service.view(id, body.driverId, body.driverName);
+  }
+
+  @Get(':id/engagement')
+  @UseGuards(AuthGuard, AdminGuard)
+  getEngagement(@Param('id', ParseIntPipe) id: number) {
+    return this.service.getEngagement(id);
+  }
+
   @Delete(':id')
   @UseGuards(AuthGuard, AdminGuard)
   remove(@Param('id', ParseIntPipe) id: number) {

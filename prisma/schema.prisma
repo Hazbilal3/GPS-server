@@ -223,6 +223,7 @@ model SpecialOrder {
   targetType        String               // "specific" | "all"
   targetDriverIds   Json?                // array of driverIds e.g. [12345, 254306]
   rejectedBy        Json?                // array of driverIds who rejected
+  viewedBy          Json?                // array of {id, name} objects for drivers who viewed
   acceptedBy        Int?
   acceptedByName    String?
   createdAt         DateTime             @default(now())
