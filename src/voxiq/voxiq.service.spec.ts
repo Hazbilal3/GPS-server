@@ -4,7 +4,7 @@ import { VoxiqService } from './voxiq.service';
 jest.mock('axios');
 
 describe('VoxiqService', () => {
-  const service = new VoxiqService();
+  const service = new VoxiqService({} as any);
   const post = axios.post as jest.Mock;
 
   beforeEach(() => {
