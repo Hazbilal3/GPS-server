@@ -23,6 +23,8 @@ type LaunchSessionInput = {
 type WebRtcSessionResponse = {
   webRtcToken?: unknown;
   expiresAt?: unknown;
+  clientState?: unknown;
+  callLogId?: unknown;
 };
 
 type SmsInput = {
@@ -115,6 +117,10 @@ export class VoxiqService {
       this.logger.warn('Voxiq WebRTC session returned an invalid response.');
       throw new BadGatewayException('Unable to create a Voxiq WebRTC session.');
     }
+    if (typeof response.data?.clientState !== 'string' || !response.data.clientState.trim()) {
+      this.logger.warn('Voxiq WebRTC session did not include client state.');
+      throw new BadGatewayException('Unable to create a Voxiq WebRTC session.');
+    }
 
     return {
       webRtcToken: response.data.webRtcToken,
@@ -122,6 +128,8 @@ export class VoxiqService {
       destinationNumber: request.destinationNumber,
       contactName: request.contactName,
       selectedOutboundNumber: request.selectedOutboundNumber,
+      clientState: response.data.clientState,
+      callLogId: typeof response.data.callLogId === 'string' ? response.data.callLogId : undefined,
     };
   }
 

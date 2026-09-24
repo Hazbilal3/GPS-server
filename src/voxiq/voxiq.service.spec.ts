@@ -84,13 +84,15 @@ describe('VoxiqService', () => {
   it('creates a WebRTC session without sending browser identity or server secrets', async () => {
     post.mockResolvedValue({
       status: 200,
-      data: { webRtcToken: 'short-lived-web-rtc-token', expiresAt: '2026-09-24T12:00:00.000Z' },
+      data: { webRtcToken: 'short-lived-web-rtc-token', clientState: 'one-time-client-state', callLogId: 'call-log-123', expiresAt: '2026-09-24T12:00:00.000Z' },
     });
 
     await expect(service.createWebRtcSession({ sub: 7 }, {
       destinationNumber: '+18609708777',
       contactName: 'Marquise Barham & Sons',
       selectedOutboundNumber: '+18605001016',
+      clientState: 'one-time-client-state',
+      callLogId: 'call-log-123',
       currentUser: { email: 'untrusted@example.com' },
     })).resolves.toEqual({
       webRtcToken: 'short-lived-web-rtc-token',
