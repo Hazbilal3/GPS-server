@@ -12,4 +12,10 @@ export class VoxiqController {
   async createClickToCallSession(@Req() req: any, @Body() body: unknown) {
     return this.voxiqService.createLaunchSession(req.user, body);
   }
+
+  @Post('click-to-call/webrtc-session')
+  @UseGuards(AuthGuard, AdminGuard)
+  async createWebRtcSession(@Req() req: any, @Body() body: unknown) {
+    return this.voxiqService.createWebRtcSession(req.user, body);
+  }
 }

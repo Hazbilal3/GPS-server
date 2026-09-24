@@ -19,16 +19,18 @@ type LaunchSessionInput = {
   selectedOutboundNumber?: unknown;
 };
 
+type WebRtcSessionResponse = {
+  webRtcToken?: unknown;
+  expiresAt?: unknown;
+};
+
 @Injectable()
 export class VoxiqService {
   private readonly logger = new Logger(VoxiqService.name);
 
   async createLaunchSession(authenticatedUser: { sub?: unknown }, input: unknown) {
     const request = this.validateRequest(input);
-    const userId = Number(authenticatedUser?.sub);
-    if (!Number.isInteger(userId) || userId <= 0) {
-      throw new UnauthorizedException('Authentication is required.');
-    }
+    this.requireAuthenticatedUser(authenticatedUser);
 
     const { baseUrl, apiKey } = this.getConfiguration();
     let response: { status: number; data?: { launchUrl?: unknown } };
@@ -76,6 +78,44 @@ export class VoxiqService {
     return { launchUrl: response.data!.launchUrl as string };
   }
 
+  async createWebRtcSession(authenticatedUser: { sub?: unknown }, input: unknown) {
+    const request = this.validateRequest(input);
+    this.requireAuthenticatedUser(authenticatedUser);
+
+    const { baseUrl, apiKey } = this.getConfiguration();
+    let response: { status: number; data?: WebRtcSessionResponse };
+    try {
+      response = await axios.post(
+        new URL('/api/integrations/click-to-call/webrtc-session', baseUrl).toString(),
+        request,
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 10_000,
+          validateStatus: () => true,
+        },
+      );
+    } catch {
+      throw new BadGatewayException('Unable to create a Voxiq WebRTC session.');
+    }
+
+    this.throwForVoxiqStatus(response.status, 'WebRTC session');
+    if (typeof response.data?.webRtcToken !== 'string' || !response.data.webRtcToken.trim()) {
+      this.logger.warn('Voxiq WebRTC session returned an invalid response.');
+      throw new BadGatewayException('Unable to create a Voxiq WebRTC session.');
+    }
+
+    return {
+      webRtcToken: response.data.webRtcToken,
+      expiresAt: typeof response.data.expiresAt === 'string' ? response.data.expiresAt : undefined,
+      destinationNumber: request.destinationNumber,
+      contactName: request.contactName,
+      selectedOutboundNumber: request.selectedOutboundNumber,
+    };
+  }
+
   private validateRequest(input: unknown) {
     const body = (input && typeof input === 'object' ? input : {}) as LaunchSessionInput;
     const destinationNumber = typeof body.destinationNumber === 'string' ? body.destinationNumber.trim() : '';
@@ -92,6 +132,35 @@ export class VoxiqService {
       throw new BadRequestException('A valid contact name is required.');
     }
     return { destinationNumber, contactName, selectedOutboundNumber };
+  }
+
+  private requireAuthenticatedUser(authenticatedUser: { sub?: unknown }) {
+    const userId = Number(authenticatedUser?.sub);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      throw new UnauthorizedException('Authentication is required.');
+    }
+  }
+
+  private throwForVoxiqStatus(status: number, operation: string) {
+    if (status === 404) {
+      throw new ServiceUnavailableException('Voxiq service is unavailable. Please contact your Voxiq administrator.');
+    }
+    if (status === 400) {
+      this.logger.warn(`Voxiq rejected a ${operation} request (HTTP 400).`);
+      throw new BadRequestException('Voxiq rejected this call request. Confirm the customer number and selected outgoing number.');
+    }
+    if (status === 401 || status === 403) {
+      this.logger.warn(`Voxiq integration authorization failed (HTTP ${status}).`);
+      throw new ServiceUnavailableException('Voxiq integration authorization failed. Please contact your Voxiq administrator.');
+    }
+    if (status === 429) {
+      this.logger.warn(`Voxiq rate limit reached for ${operation}.`);
+      throw new HttpException('Too many Voxiq call requests. Please try again shortly.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    if (status < 200 || status >= 300) {
+      this.logger.warn(`Voxiq ${operation} failed (HTTP ${status}).`);
+      throw new BadGatewayException('Unable to create a Voxiq call session.');
+    }
   }
 
   private getConfiguration() {

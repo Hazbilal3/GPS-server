@@ -80,4 +80,36 @@ describe('VoxiqService', () => {
       selectedOutboundNumber: '+18605001016',
     })).rejects.toThrow('Unable to create a Voxiq call session');
   });
+
+  it('creates a WebRTC session without sending browser identity or server secrets', async () => {
+    post.mockResolvedValue({
+      status: 200,
+      data: { webRtcToken: 'short-lived-web-rtc-token', expiresAt: '2026-09-24T12:00:00.000Z' },
+    });
+
+    await expect(service.createWebRtcSession({ sub: 7 }, {
+      destinationNumber: '+18609708777',
+      contactName: 'Marquise Barham & Sons',
+      selectedOutboundNumber: '+18605001016',
+      currentUser: { email: 'untrusted@example.com' },
+    })).resolves.toEqual({
+      webRtcToken: 'short-lived-web-rtc-token',
+      expiresAt: '2026-09-24T12:00:00.000Z',
+      destinationNumber: '+18609708777',
+      contactName: 'Marquise Barham & Sons',
+      selectedOutboundNumber: '+18605001016',
+    });
+
+    expect(post).toHaveBeenCalledWith(
+      'https://voxiq.bytechsol.com/api/integrations/click-to-call/webrtc-session',
+      {
+        destinationNumber: '+18609708777',
+        contactName: 'Marquise Barham & Sons',
+        selectedOutboundNumber: '+18605001016',
+      },
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-server-only-key' }) }),
+    );
+    expect(post.mock.calls[0][1]).not.toHaveProperty('currentUser');
+    expect(post.mock.calls[0][1]).not.toHaveProperty('webRtcToken');
+  });
 });
