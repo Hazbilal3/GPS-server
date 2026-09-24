@@ -136,7 +136,8 @@ export class VoxiqService {
     const targetIds = order.targetType === 'all' ? recipients.map(r => r.driverId) : ((order.targetDriverIds as number[]) || []);
     if (recipients.some(r => !targetIds.includes(r.driverId))) throw new BadRequestException('SMS recipients must be selected for this order.');
     const drivers = await this.prisma.user.findMany({ where: { driverId: { in: recipients.map(r => r.driverId) }, smsOptedOut: false }, select: { driverId: true, phoneNumber: true, fullName: true } });
-    if (drivers.length !== recipients.length || recipients.some(r => !drivers.some(d => d.driverId === r.driverId && d.phoneNumber === r.phoneNumber))) throw new BadRequestException('A selected driver is opted out or has no matching phone number.');
+    const normalizeE164 = (raw: string | null): string | null => { if (!raw) return null; const d = raw.replace(/\D/g, ''); if (d.length === 10) return `+1${d}`; if (d.length === 11 && d.startsWith('1')) return `+${d}`; return null; };
+    if (drivers.length !== recipients.length || recipients.some(r => !drivers.some(d => d.driverId === r.driverId && normalizeE164(d.phoneNumber) === r.phoneNumber))) throw new BadRequestException('A selected driver is opted out or has no matching phone number.');
     const { baseUrl, apiKey } = this.getConfiguration();
     let response: { status: number; data?: unknown };
     try {
@@ -145,7 +146,8 @@ export class VoxiqService {
         { selectedOutboundNumber: request.selectedOutboundNumber, messagePurpose: 'transactional', message: request.message, recipients: recipients.map(({ phoneNumber, name }) => ({ phoneNumber, name })) },
         { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, timeout: 10_000, validateStatus: () => true },
       );
-    } catch {
+    } catch (err: any) {
+      this.logger.error('Voxiq SMS axios error:', err?.message ?? err);
       throw new BadGatewayException('Unable to send Voxiq driver notifications.');
     }
     this.throwForVoxiqStatus(response.status, 'SMS notification');

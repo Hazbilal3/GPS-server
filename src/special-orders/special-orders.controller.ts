@@ -170,6 +170,12 @@ export class SpecialOrdersController {
     return this.service.getEngagement(id);
   }
 
+  @Get(':id/sms-recipients')
+  @UseGuards(AuthGuard, AdminGuard)
+  getSmsRecipients(@Param('id', ParseIntPipe) id: number) {
+    return this.service.getSmsRecipients(id);
+  }
+
   @Delete(':id')
   @UseGuards(AuthGuard, AdminGuard)
   remove(@Param('id', ParseIntPipe) id: number) {

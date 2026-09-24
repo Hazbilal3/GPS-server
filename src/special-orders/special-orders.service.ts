@@ -8,6 +8,13 @@ import { getPayrollWeekKey } from '../utils/payroll-week';
 import { DriverNotificationsService } from '../driver-notifications/driver-notifications.service';
 
 const ADMIN_EMAIL = 'c.taveras@expeditedtransportservices.net';
+
+function normalizeE164(raw: string): string | null {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return null; // not a valid US number
+}
 const ROUTES_EMAIL = 'ets.routes@gmail.com';
 
 @Injectable()
@@ -95,7 +102,7 @@ export class SpecialOrdersService {
 
       const parts: string[] = [];
       if (order.pickupAddress && order.deliveryAddress) {
-        parts.push(`${order.pickupAddress} → ${order.deliveryAddress}`);
+        parts.push(`${order.pickupAddress} -> ${order.deliveryAddress}`);
       } else {
         parts.push(order.routeName);
       }
@@ -452,6 +459,40 @@ export class SpecialOrdersService {
         ? { id: order.acceptedBy, name: order.acceptedByName ?? `Driver #${order.acceptedBy}` }
         : null,
     };
+  }
+
+  async getSmsRecipients(id: number) {
+    const order = await this.prisma.specialOrder.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const where = order.targetType === 'all'
+      ? { driverId: { not: null as any }, smsOptedOut: false, phoneNumber: { not: null as any } }
+      : { driverId: { in: (order.targetDriverIds as number[]) ?? [] }, smsOptedOut: false, phoneNumber: { not: null as any } };
+
+    const drivers = await this.prisma.user.findMany({
+      where,
+      select: { driverId: true, fullName: true, phoneNumber: true },
+    });
+
+    const recipients = drivers
+      .map(d => ({ driverId: d.driverId!, name: d.fullName ?? `Driver #${d.driverId}`, phoneNumber: normalizeE164(d.phoneNumber!) }))
+      .filter(d => d.phoneNumber !== null) as { driverId: number; name: string; phoneNumber: string }[];
+
+    const parts: string[] = [];
+    if (order.pickupAddress && order.deliveryAddress) {
+      parts.push(`${order.pickupAddress} -> ${order.deliveryAddress}`);
+    } else {
+      parts.push(order.routeName);
+    }
+    parts.push(`${order.stops} Stop${order.stops !== 1 ? 's' : ''}`);
+    parts.push(`$${order.price}`);
+    if ((order as any).pieces != null) parts.push(`${(order as any).pieces} pcs`);
+    if ((order as any).miles != null) parts.push(`${(order as any).miles} mi`);
+    if ((order as any).vehicleSize) parts.push((order as any).vehicleSize);
+    if ((order as any).itemWeight != null) parts.push(`${(order as any).itemWeight} lbs`);
+    const message = parts.join(' | ');
+
+    return { recipients, message };
   }
 
   async remove(id: number) {
