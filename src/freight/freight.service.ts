@@ -296,6 +296,7 @@ export class FreightService {
         documents: true,
         preTripInspections: { include: { driver: true } },
         clockSessions: { include: { driver: true, truck: true } },
+        expenses: { orderBy: { createdAt: 'asc' } },
       },
     });
     if (!load) throw new NotFoundException('Load not found');
