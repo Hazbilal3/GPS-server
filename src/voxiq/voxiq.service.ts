@@ -187,7 +187,7 @@ export class VoxiqService {
     const recipients = Array.isArray(body.recipients) ? body.recipients : [];
     if (!Number.isInteger(orderId) || orderId <= 0) throw new BadRequestException('A saved order is required.');
     if (!APPROVED_OUTBOUND_NUMBERS.has(selectedOutboundNumber)) throw new BadRequestException('Select an approved outgoing number.');
-    if (!message || message.length > 250 || /[^\x20-\x7E]/.test(message)) throw new BadRequestException('SMS message must be 250 standard English characters or fewer.');
+    if (!message || /[^\x20-\x7E]/.test(message)) throw new BadRequestException('SMS message must use standard English characters only.');
     if (!recipients.length || recipients.length > 50) throw new BadRequestException('Select between 1 and 50 drivers.');
     const normalizedRecipients = recipients.map((recipient) => {
       const value = recipient && typeof recipient === 'object' ? recipient as { driverId?: unknown; phoneNumber?: unknown; name?: unknown } : {};
