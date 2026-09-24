@@ -387,6 +387,7 @@ model EarlyPayoutRequest {
   adminNote      String?
   paidDates      String[] // days admin confirms on approval
   paidAmount     Float?   // total amount paid early (net, after app fee)
+  fee            Float    @default(2) // $2 early payout service fee charged per request
   paidAt         DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

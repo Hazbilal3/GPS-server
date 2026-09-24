@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "EarlyPayoutRequest" ADD COLUMN "fee" DOUBLE PRECISION NOT NULL DEFAULT 2;

@@ -71,8 +71,9 @@ export class EarlyPayoutService {
       data: {
         status: 'approved',
         adminNote: adminNote ?? null,
-        paidDates: req.requestedDates, // always mirrors what driver requested
+        paidDates: req.requestedDates,
         paidAmount: paidAmount ?? null,
+        fee: 2,
         paidAt: new Date(),
       },
     });
