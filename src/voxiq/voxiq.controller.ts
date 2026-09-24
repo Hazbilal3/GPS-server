@@ -18,4 +18,10 @@ export class VoxiqController {
   async createWebRtcSession(@Req() req: any, @Body() body: unknown) {
     return this.voxiqService.createWebRtcSession(req.user, body);
   }
+
+  @Post('order-notification-sms')
+  @UseGuards(AuthGuard, AdminGuard)
+  async sendOrderNotificationSms(@Req() req: any, @Body() body: unknown) {
+    return this.voxiqService.sendTransactionalSms(req.user, body);
+  }
 }

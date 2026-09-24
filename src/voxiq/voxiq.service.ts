@@ -9,6 +9,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import axios from 'axios';
+import { PrismaService } from '../prisma.service';
 
 const APPROVED_OUTBOUND_NUMBERS = new Set(['+18605001016', '+19593333361']);
 const E164_PATTERN = /^\+[1-9]\d{7,14}$/;
@@ -24,9 +25,17 @@ type WebRtcSessionResponse = {
   expiresAt?: unknown;
 };
 
+type SmsInput = {
+  orderId?: unknown;
+  selectedOutboundNumber?: unknown;
+  message?: unknown;
+  recipients?: unknown;
+};
+
 @Injectable()
 export class VoxiqService {
   private readonly logger = new Logger(VoxiqService.name);
+  constructor(private readonly prisma: PrismaService) {}
 
   async createLaunchSession(authenticatedUser: { sub?: unknown }, input: unknown) {
     const request = this.validateRequest(input);
@@ -116,6 +125,42 @@ export class VoxiqService {
     };
   }
 
+  async sendTransactionalSms(authenticatedUser: { sub?: unknown }, input: unknown) {
+    this.requireAuthenticatedUser(authenticatedUser);
+    const request = this.validateSmsRequest(input);
+    const existing = await this.prisma.orderSmsNotification.findMany({ where: { orderId: request.orderId, driverId: { in: request.recipients.map(r => r.driverId) }, notificationType: 'order_created' } });
+    const recipients = request.recipients.filter(recipient => !existing.some(record => record.driverId === recipient.driverId && record.status !== 'failed'));
+    if (!recipients.length) return { totalRecipients: request.recipients.length, sent: 0, failed: 0, skipped: request.recipients.length, results: [] };
+    const order = await this.prisma.specialOrder.findUnique({ where: { id: request.orderId } });
+    if (!order) throw new BadRequestException('Order not found.');
+    const targetIds = order.targetType === 'all' ? recipients.map(r => r.driverId) : ((order.targetDriverIds as number[]) || []);
+    if (recipients.some(r => !targetIds.includes(r.driverId))) throw new BadRequestException('SMS recipients must be selected for this order.');
+    const drivers = await this.prisma.user.findMany({ where: { driverId: { in: recipients.map(r => r.driverId) }, smsOptedOut: false }, select: { driverId: true, phoneNumber: true, fullName: true } });
+    if (drivers.length !== recipients.length || recipients.some(r => !drivers.some(d => d.driverId === r.driverId && d.phoneNumber === r.phoneNumber))) throw new BadRequestException('A selected driver is opted out or has no matching phone number.');
+    const { baseUrl, apiKey } = this.getConfiguration();
+    let response: { status: number; data?: unknown };
+    try {
+      response = await axios.post(
+        new URL('/api/integrations/click-to-call/sms/send', baseUrl).toString(),
+        { selectedOutboundNumber: request.selectedOutboundNumber, messagePurpose: 'transactional', message: request.message, recipients: recipients.map(({ phoneNumber, name }) => ({ phoneNumber, name })) },
+        { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, timeout: 10_000, validateStatus: () => true },
+      );
+    } catch {
+      throw new BadGatewayException('Unable to send Voxiq driver notifications.');
+    }
+    this.throwForVoxiqStatus(response.status, 'SMS notification');
+    const data = response.data as { results?: { phoneNumber?: string; status?: string; messageId?: string }[]; sent?: number; failed?: number };
+    await Promise.all(recipients.map(async recipient => {
+      const result = data.results?.find(item => item.phoneNumber === recipient.phoneNumber);
+      await this.prisma.orderSmsNotification.upsert({
+        where: { orderId_driverId_notificationType: { orderId: request.orderId, driverId: recipient.driverId, notificationType: 'order_created' } },
+        create: { orderId: request.orderId, driverId: recipient.driverId, notificationType: 'order_created', status: result?.status === 'queued' ? 'queued' : 'failed', selectedOutboundNumber: request.selectedOutboundNumber, messageId: result?.messageId },
+        update: { status: result?.status === 'queued' ? 'queued' : 'failed', selectedOutboundNumber: request.selectedOutboundNumber, messageId: result?.messageId },
+      });
+    }));
+    return data;
+  }
+
   private validateRequest(input: unknown) {
     const body = (input && typeof input === 'object' ? input : {}) as LaunchSessionInput;
     const destinationNumber = typeof body.destinationNumber === 'string' ? body.destinationNumber.trim() : '';
@@ -132,6 +177,27 @@ export class VoxiqService {
       throw new BadRequestException('A valid contact name is required.');
     }
     return { destinationNumber, contactName, selectedOutboundNumber };
+  }
+
+  private validateSmsRequest(input: unknown) {
+    const body = (input && typeof input === 'object' ? input : {}) as SmsInput;
+    const orderId = Number(body.orderId);
+    const selectedOutboundNumber = typeof body.selectedOutboundNumber === 'string' ? body.selectedOutboundNumber.trim() : '';
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+    const recipients = Array.isArray(body.recipients) ? body.recipients : [];
+    if (!Number.isInteger(orderId) || orderId <= 0) throw new BadRequestException('A saved order is required.');
+    if (!APPROVED_OUTBOUND_NUMBERS.has(selectedOutboundNumber)) throw new BadRequestException('Select an approved outgoing number.');
+    if (!message || message.length > 250 || /[^\x20-\x7E]/.test(message)) throw new BadRequestException('SMS message must be 250 standard English characters or fewer.');
+    if (!recipients.length || recipients.length > 50) throw new BadRequestException('Select between 1 and 50 drivers.');
+    const normalizedRecipients = recipients.map((recipient) => {
+      const value = recipient && typeof recipient === 'object' ? recipient as { driverId?: unknown; phoneNumber?: unknown; name?: unknown } : {};
+      const driverId = Number(value.driverId);
+      const phoneNumber = typeof value.phoneNumber === 'string' ? value.phoneNumber.trim() : '';
+      const name = typeof value.name === 'string' ? value.name.trim() : '';
+      if (!Number.isInteger(driverId) || driverId <= 0 || !E164_PATTERN.test(phoneNumber) || !name || name.length > 200) throw new BadRequestException('Each selected driver needs a valid name and E.164 phone number.');
+      return { driverId, phoneNumber, name };
+    });
+    return { orderId, selectedOutboundNumber, message, recipients: normalizedRecipients };
   }
 
   private requireAuthenticatedUser(authenticatedUser: { sub?: unknown }) {

@@ -51,6 +51,7 @@ model User {
   vehicleSize          String?
   gustoComplete        Boolean   @default(false)
   openforceComplete    Boolean   @default(false)
+  smsOptedOut          Boolean   @default(false)
   agreements           DriverAgreement[]
 }
 
@@ -267,6 +268,21 @@ model DriverNotification {
   createdAt DateTime @default(now())
 
   @@index([driverId])
+}
+
+model OrderSmsNotification {
+  id               Int      @id @default(autoincrement())
+  orderId          Int
+  driverId         Int
+  notificationType String
+  status           String
+  selectedOutboundNumber String
+  messageId        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([orderId, driverId, notificationType])
+  @@index([orderId, status])
 }
 
 model SpecialOrderEarning {
