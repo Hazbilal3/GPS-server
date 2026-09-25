@@ -528,13 +528,13 @@ export class FreightService {
         pickupCompany: true, deliveryCompany: true,
         pickupCity: true, deliveryCity: true,
         pickupDate: true, deliveryDate: true,
-        driverPay: true, paidAt: true, createdAt: true,
+        driverPay: true, driverPayStatus: true, driverPaidAt: true, createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    const paid     = loads.filter(l => l.status === 'paid' || l.status === 'closed');
-    const pending  = loads.filter(l => l.status !== 'paid' && l.status !== 'closed');
+    const paid    = loads.filter(l => l.driverPayStatus === 'paid');
+    const pending = loads.filter(l => l.driverPayStatus !== 'paid');
 
     const totalPaid    = paid.reduce((s, l) => s + (l.driverPay ?? 0), 0);
     const totalPending = pending.reduce((s, l) => s + (l.driverPay ?? 0), 0);
