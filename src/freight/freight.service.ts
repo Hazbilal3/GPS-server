@@ -739,14 +739,13 @@ export class FreightService {
     if (!load) throw new NotFoundException('Load not found');
     if (!body.recipientEmail) throw new BadRequestException('Recipient email is required');
 
-    // Auto-generate next invoice number
-    const last = await this.prisma.freightLoad.findFirst({
-      where: { invoiceNumber: { not: null } },
-      orderBy: { invoiceNumber: 'desc' },
-      select: { invoiceNumber: true },
+    // Atomic counter — never reuses a number even if loads are deleted
+    const counter = await (this.prisma as any).invoiceCounter.upsert({
+      where: { id: 1 },
+      create: { id: 1, lastNum: 6257 },
+      update: { lastNum: { increment: 1 } },
     });
-    const nextNum = last?.invoiceNumber ? (parseInt(last.invoiceNumber, 10) + 1) : 6257;
-    const invoiceNumber = String(nextNum);
+    const invoiceNumber = String(counter.lastNum);
 
     // Calculate due date from payment terms (e.g. "Net 30" → +30 days)
     const today = new Date();
@@ -775,42 +774,77 @@ export class FreightService {
         // non-fatal — skip this document
       }
     }
-    // Auto-attach POD if available
-    if (load.podUrl) {
-      try {
-        const podRes = await fetch(load.podUrl);
-        if (podRes.ok) {
-          const podBuf = Buffer.from(await podRes.arrayBuffer());
-          const podExt = load.podUrl.split('?')[0].split('.').pop() ?? 'jpg';
-          attachments.push({ filename: `POD-${load.loadNumber ?? load.id}.${podExt}`, content: podBuf });
-        }
-      } catch {
-        // POD fetch failure is non-fatal — proceed without it
-      }
-    }
     // Manually attached admin document
     if (extraDocBuffer && extraDocName) {
       attachments.push({ filename: extraDocName, content: extraDocBuffer });
     }
 
-    // Email HTML
+    // Email HTML — full invoice layout
+    const pickupCity = (load as any).pickupCity ?? '';
+    const pickupState = (load as any).pickupState ?? '';
+    const deliveryCity = (load as any).deliveryCity ?? '';
+    const deliveryState = (load as any).deliveryState ?? '';
+    const routeDesc = [[pickupCity, pickupState].filter(Boolean).join(', '), [deliveryCity, deliveryState].filter(Boolean).join(', ')].filter(Boolean).join(' TO ') || (load.loadNumber ?? `Load #${load.id}`);
+    const invoiceDateStr = today.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+    const dueDateStr = dueDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+
     const html = `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-        <div style="background:#1e3a8a;padding:20px 24px;">
-          <h2 style="color:#fff;margin:0;font-size:18px;">Expedited Transport Services LLC</h2>
+      <div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;background:#fff;color:#111827;">
+        <div style="background:#1e3a8a;height:8px;width:100%;"></div>
+        <div style="padding:28px 40px 20px;display:flex;justify-content:space-between;align-items:flex-start;">
+          <div>
+            <div style="font-weight:700;color:#1e3a8a;font-size:15px;">Expedited Transport Services LLC</div>
+            <div style="font-weight:700;color:#1e3a8a;font-size:15px;">MC 897804</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:4px;">268 Trout Brook Dr., West Hartford, CT 06110, UNITED STATES</div>
+            <div style="font-size:12px;color:#6b7280;">c.taveras@expeditedtransportservices.net</div>
+            <div style="font-size:12px;color:#2563eb;text-decoration:underline;">www.expeditedtransportservices.net</div>
+          </div>
         </div>
-        <div style="padding:24px;">
-          <p style="font-size:15px;color:#111;">Dear ${body.billingContact || body.billingCompany},</p>
-          <p style="color:#374151;">Please find attached Invoice <strong>#${invoiceNumber}</strong> for load <strong>${load.loadNumber ?? `#${load.id}`}</strong>.</p>
-          <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-            <tr><td style="padding:8px;color:#6b7280;font-size:13px;">Invoice No.</td><td style="padding:8px;font-weight:700;">${invoiceNumber}</td></tr>
-            <tr style="background:#f9fafb;"><td style="padding:8px;color:#6b7280;font-size:13px;">Amount</td><td style="padding:8px;font-weight:700;color:#e91e8c;">$${amount.toFixed(2)}</td></tr>
-            <tr><td style="padding:8px;color:#6b7280;font-size:13px;">Payment Terms</td><td style="padding:8px;">${body.paymentTerms || 'Net 30'}</td></tr>
-            <tr style="background:#f9fafb;"><td style="padding:8px;color:#6b7280;font-size:13px;">Due Date</td><td style="padding:8px;">${dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</td></tr>
+        <div style="padding:0 40px 20px;">
+          <div style="font-size:32px;font-weight:900;color:#1e3a8a;margin-bottom:16px;">Invoice</div>
+          <table style="border-collapse:collapse;">
+            <tr><td style="font-weight:700;padding-right:16px;padding-bottom:4px;font-size:13px;">Invoice No.:</td><td style="font-size:13px;padding-bottom:4px;">${invoiceNumber}</td></tr>
+            <tr><td style="font-weight:700;padding-right:16px;padding-bottom:4px;font-size:13px;">Invoice Date:</td><td style="font-size:13px;padding-bottom:4px;">${invoiceDateStr}</td></tr>
+            <tr><td style="font-weight:700;padding-right:16px;padding-bottom:4px;font-size:13px;">Reference:</td><td style="font-size:13px;padding-bottom:4px;">${load.loadNumber ?? ''}</td></tr>
+            <tr><td style="font-weight:700;padding-right:16px;padding-bottom:4px;font-size:13px;">Due Date:</td><td style="font-size:13px;padding-bottom:4px;">${dueDateStr}</td></tr>
           </table>
-          ${body.notes ? `<p style="color:#374151;font-size:13px;"><strong>Notes:</strong> ${body.notes}</p>` : ''}
-          <p style="color:#374151;">Please remit payment by the due date. Thank you for your business.</p>
-          <p style="color:#6b7280;font-size:12px;margin-top:24px;">Expedited Transport Services LLC · 268 Trout Brook Dr., West Hartford, CT 06110<br/>c.taveras@expeditedtransportservices.net · www.expeditedtransportservices.net</p>
+        </div>
+        <div style="padding:0 40px 24px;">
+          <div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:6px;">Invoice for</div>
+          <div style="font-weight:700;font-size:13px;">${body.billingCompany}</div>
+          ${body.billingContact ? `<div style="font-size:13px;">${body.billingContact}</div>` : ''}
+          ${body.recipientEmail ? `<div style="font-size:13px;">${body.recipientEmail}</div>` : ''}
+          ${body.billingPhone ? `<div style="font-size:13px;">${body.billingPhone}</div>` : ''}
+        </div>
+        <div style="border-top:1px solid #e5e7eb;margin:0 40px;"></div>
+        <div style="padding:0 40px;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr>
+                <th style="padding:10px 8px;text-align:left;color:#2563eb;font-weight:700;font-size:13px;border-bottom:2px solid #e5e7eb;">Description</th>
+                <th style="padding:10px 8px;text-align:right;color:#2563eb;font-weight:700;font-size:13px;border-bottom:2px solid #e5e7eb;">Qty</th>
+                <th style="padding:10px 8px;text-align:right;color:#2563eb;font-weight:700;font-size:13px;border-bottom:2px solid #e5e7eb;">Unit price</th>
+                <th style="padding:10px 8px;text-align:right;color:#2563eb;font-weight:700;font-size:13px;border-bottom:2px solid #e5e7eb;">Total price</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="background:#f3f4f6;">
+                <td style="padding:10px 8px;font-size:13px;">${routeDesc}</td>
+                <td style="padding:10px 8px;text-align:right;font-size:13px;">1</td>
+                <td style="padding:10px 8px;text-align:right;font-size:13px;">$${amount.toFixed(2)}</td>
+                <td style="padding:10px 8px;text-align:right;font-size:13px;">$${amount.toFixed(2)}</td>
+              </tr>
+              ${body.notes ? `<tr><td colspan="4" style="padding:10px 8px;font-size:12px;color:#6b7280;">Notes: ${body.notes}</td></tr>` : ''}
+            </tbody>
+          </table>
+          <div style="border-top:1px solid #e5e7eb;margin-top:4px;display:flex;justify-content:flex-end;align-items:center;gap:24px;padding:12px 8px 0;">
+            <span style="font-size:13px;color:#6b7280;">Total</span>
+            <span style="font-size:22px;font-weight:900;color:#e91e8c;">$${amount.toFixed(2)}</span>
+          </div>
+        </div>
+        <div style="background:#1e3a8a;height:4px;width:100%;margin-top:40px;"></div>
+        <div style="padding:16px 40px;font-size:11px;color:#6b7280;">
+          Please remit payment by <strong>${dueDateStr}</strong> (${body.paymentTerms || 'Net 30'}). The invoice PDF is attached for your records. Thank you for your business.
         </div>
       </div>`;
 

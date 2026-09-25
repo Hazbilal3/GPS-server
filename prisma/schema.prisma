@@ -729,3 +729,8 @@ model FreightDriverNotification {
 
   @@index([freightDriverId])
 }
+
+model InvoiceCounter {
+  id      Int @id @default(1)
+  lastNum Int @default(6256)
+}
